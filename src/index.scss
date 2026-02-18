@@ -1,0 +1,11 @@
+/* 优化 dock resize 性能 */
+[data-type="ai-dock"] {
+    contain: layout style paint;
+    
+    iframe {
+        contain: layout style paint;
+        /* 使用 GPU 加速 */
+        transform: translateZ(0);
+        backface-visibility: hidden;
+    }
+}

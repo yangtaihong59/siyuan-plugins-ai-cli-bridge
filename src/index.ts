@@ -133,13 +133,71 @@ export default class AIAgentBridgePlugin extends Plugin {
                 dock.element.style.width = "100%";
                 dock.element.style.height = "100%";
                 dock.element.style.overflow = "hidden";
-                dock.element.innerHTML = `
-                    <iframe
-                        src="${plugin.config.openCodeUrl}"
-                        style="width: 100%; height: 100%; border: none; display: block;"
-                        allow="clipboard-read; clipboard-write"
-                    ></iframe>
-                `;
+                
+                const iframe = document.createElement("iframe");
+                iframe.src = plugin.config.openCodeUrl;
+                iframe.style.cssText = "width: 100%; height: 100%; border: none; display: block; pointer-events: auto; will-change: auto;";
+                iframe.setAttribute("allow", "clipboard-read; clipboard-write");
+                dock.element.appendChild(iframe);
+                
+                // 优化 resize 性能：拖拽时禁用 iframe 交互以减少重绘
+                let resizeTimer: ReturnType<typeof setTimeout> | null = null;
+                let isResizing = false;
+                
+                const handleResizeStart = () => {
+                    if (!isResizing) {
+                        isResizing = true;
+                        iframe.style.pointerEvents = "none";
+                        iframe.style.willChange = "auto";
+                    }
+                };
+                
+                const handleResizeEnd = () => {
+                    isResizing = false;
+                    // 延迟恢复交互，确保 resize 完成
+                    if (resizeTimer) clearTimeout(resizeTimer);
+                    resizeTimer = setTimeout(() => {
+                        iframe.style.pointerEvents = "auto";
+                        iframe.style.willChange = "auto";
+                    }, 150);
+                };
+                
+                // 监听 dock 容器的 resize 事件
+                const resizeObserver = new ResizeObserver(() => {
+                    handleResizeStart();
+                    // 重置定时器，防抖处理
+                    if (resizeTimer) clearTimeout(resizeTimer);
+                    resizeTimer = setTimeout(() => {
+                        handleResizeEnd();
+                    }, 100);
+                });
+                
+                resizeObserver.observe(dock.element);
+                
+                // 监听鼠标事件，检测拖拽边缘
+                let isDragging = false;
+                dock.element.addEventListener("mousedown", (e: MouseEvent) => {
+                    // 检查是否在拖拽边缘
+                    const rect = dock.element.getBoundingClientRect();
+                    const edgeThreshold = 5;
+                    const isNearEdge = 
+                        e.clientX <= rect.left + edgeThreshold ||
+                        e.clientX >= rect.right - edgeThreshold ||
+                        e.clientY <= rect.top + edgeThreshold ||
+                        e.clientY >= rect.bottom - edgeThreshold;
+                    
+                    if (isNearEdge) {
+                        isDragging = true;
+                        handleResizeStart();
+                    }
+                });
+                
+                document.addEventListener("mouseup", () => {
+                    if (isDragging) {
+                        isDragging = false;
+                        handleResizeEnd();
+                    }
+                });
             },
             destroy() {
                 console.log("[AI Agent Bridge] dock destroyed");
