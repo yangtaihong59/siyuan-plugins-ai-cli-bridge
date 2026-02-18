@@ -1,8 +1,8 @@
 {
   "name": "siyuan-plugins-ai-cli-bridge",
   "author": "OpenCode",
-  "url": "https://github.com/opencode/siyuan-ai-agent-bridge",
-  "version": "0.1.0",
+  "url": "https://github.com/yangtaihong59/siyuan-plugins-ai-cli-bridge",
+  "version": "0.1.1",
   "minAppVersion": "2.9.0",
   "backends": ["all"],
   "frontends": ["all"],
