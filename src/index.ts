@@ -33,13 +33,28 @@ export default class AIAgentBridgePlugin extends Plugin {
         await this.loadConfig();
         
         // 注册 AI 图标
+        // 原来的图标（已注释）
+        // this.addIcons(`<symbol id="iconAI" viewBox="0 0 32 32">
+        // <path d="M16 2c-7.732 0-14 6.268-14 14s6.268 14 14 14 14-6.268 14-14-6.268-14-14-14zM16 26c-5.514 0-10-4.486-10-10s4.486-10 10-10 10 4.486 10 10-4.486 10-10 10z"></path>
+        // <path d="M16 8c-0.552 0-1 0.448-1 1v6c0 0.552 0.448 1 1 1s1-0.448 1-1v-6c0-0.552-0.448-1-1-1z"></path>
+        // <path d="M20.5 12.5c-0.276 0-0.5 0.224-0.5 0.5v2c0 0.276 0.224 0.5 0.5 0.5s0.5-0.224 0.5-0.5v-2c0-0.276-0.224-0.5-0.5-0.5z"></path>
+        // <path d="M11.5 12.5c-0.276 0-0.5 0.224-0.5 0.5v2c0 0.276 0.224 0.5 0.5 0.5s0.5-0.224 0.5-0.5v-2c0-0.276-0.224-0.5-0.5-0.5z"></path>
+        // <path d="M12 20c0.8 1.2 2.2 2 3.8 2s3-0.8 3.8-2l-1.2-0.8c-0.5 0.8-1.4 1.3-2.4 1.3s-1.9-0.5-2.4-1.3l-1.2 0.8z"></path>
+        // </symbol>`);
+        
+        // 新的图标：竖着的长方体 [] 样式（宽度加倍）
         this.addIcons(`<symbol id="iconAI" viewBox="0 0 32 32">
-<path d="M16 2c-7.732 0-14 6.268-14 14s6.268 14 14 14 14-6.268 14-14-6.268-14-14-14zM16 26c-5.514 0-10-4.486-10-10s4.486-10 10-10 10 4.486 10 10-4.486 10-10 10z"></path>
-<path d="M16 8c-0.552 0-1 0.448-1 1v6c0 0.552 0.448 1 1 1s1-0.448 1-1v-6c0-0.552-0.448-1-1-1z"></path>
-<path d="M20.5 12.5c-0.276 0-0.5 0.224-0.5 0.5v2c0 0.276 0.224 0.5 0.5 0.5s0.5-0.224 0.5-0.5v-2c0-0.276-0.224-0.5-0.5-0.5z"></path>
-<path d="M11.5 12.5c-0.276 0-0.5 0.224-0.5 0.5v2c0 0.276 0.224 0.5 0.5 0.5s0.5-0.224 0.5-0.5v-2c0-0.276-0.224-0.5-0.5-0.5z"></path>
-<path d="M12 20c0.8 1.2 2.2 2 3.8 2s3-0.8 3.8-2l-1.2-0.8c-0.5 0.8-1.4 1.3-2.4 1.3s-1.9-0.5-2.4-1.3l-1.2 0.8z"></path>
-</symbol>`);
+        <!-- 外框（左侧） -->
+        <rect x="8" y="4" width="2" height="24" rx="0.5" fill="currentColor"/>
+        <!-- 外框（右侧） -->
+        <rect x="22" y="4" width="2" height="24" rx="0.5" fill="currentColor"/>
+        <!-- 外框（顶部） -->
+        <rect x="8" y="4" width="16" height="2" rx="0.5" fill="currentColor"/>
+        <!-- 外框（底部） -->
+        <rect x="8" y="26" width="16" height="2" rx="0.5" fill="currentColor"/>
+        <!-- 内部填充（可选，增加立体感） -->
+        <rect x="10" y="6" width="12" height="20" rx="0.5" fill="currentColor" opacity="0.1"/>
+        </symbol>`);
         
         // 在 onload 中创建 Dock
         if (this.config.enableDock) {
@@ -122,8 +137,8 @@ export default class AIAgentBridgePlugin extends Plugin {
             config: {
                 position: "RightTop",
                 size: { width: 300, height: 0 },
-                icon: "",
-                title: "",
+                icon: "iconAI",
+                title: "AI Agent",
                 hotkey: DOCK_HOTKEY,
                 show: true,
             },

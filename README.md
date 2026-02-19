@@ -1,5 +1,7 @@
 # AI CLI Bridge for SiYuan
 
+[English](README.md) | [中文](README_zh_CN.md)
+
 Embed Opencode Claude code and other AI CLI tools as a sidebar panel, working with MCP to help you automatically operate notes.
 
 It is recommended to use it together with the [syplugin-anMCPServer](https://github.com/OpaqueGlass/syplugin-anMCPServer "GitHub Repo") plugin.
@@ -37,6 +39,7 @@ Configure in Settings → Plugins → AI CLI Bridge:
 | Enable AI Agent Dock   | Whether to show sidebar panel  | Enabled                |
 | OpenCode URL           | Web URL to embed               | http://localhost:4096  |
 | Dock Position          | Panel position (Left/Right/Bottom) | Right              |
+| Drag & Drop ID Transfer Method | How to transfer ID when dragging | Both                |
 | Enable Logging         | Enable debug logging           | Enabled                |
 
 ### Recommended Setups
