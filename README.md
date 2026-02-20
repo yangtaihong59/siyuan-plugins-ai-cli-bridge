@@ -2,47 +2,47 @@
 
 [English](README.md) | [中文](README_zh_CN.md)
 
-Embed Opencode Claude code and other AI CLI tools as a sidebar panel, working with MCP to help you automatically operate notes.
+Embed OpenCode, Claude Code, and other AI CLI tools as a sidebar panel in SiYuan, and use them with MCP to operate your notes automatically.
 
-It is recommended to use it together with the [syplugin-anMCPServer](https://github.com/OpaqueGlass/syplugin-anMCPServer "GitHub Repo") plugin.
+Recommended to use with the [syplugin-anMCPServer](https://github.com/OpaqueGlass/syplugin-anMCPServer "GitHub Repo") plugin, or [siyuan-plugins-mcp-sisyphus](https://github.com/yangtaihong59/siyuan-plugins-mcp-sisyphus).
 
 ## Features
 
-- **Sidebar Integration**: Add a dockable AI Agent panel in SiYuan Note
-- **Custom URL**: Support configuring any web-based AI tools (OpenCode, local LLM UI, etc.)
-- **Flexible Layout**: Position the panel on Left/Right/Bottom with resizable dimensions
-- **Keyboard Shortcut**: Quick access with `⌥⌘A` (Mac) or `Alt+Ctrl+A` (Windows/Linux)
+- **Sidebar integration**: Add a dockable AI Agent panel in SiYuan
+- **Custom URL**: Configure any web-based AI tool (OpenCode, local LLM UI, etc.)
+- **Flexible layout**: Place the panel on the left, right, or bottom and resize it
+- **Shortcuts**: Open the panel with `⌥⌘A` (Mac) or `Alt+Ctrl+A` (Windows/Linux)
 
 ## Installation
 
-1. You need to install Opencode first
-2. Use the opencode web command to start its web GUI
-3. Download the latest release from GitHub
-4. Extract to SiYuan's `data/plugins` directory
-5. Enable "AI CLI Bridge" in Settings → Plugins
-6. If you need to open Claude or other CLIs, you can use the terminal built into Opencode web
+1. Install OpenCode and a SiYuan MCP tool (e.g. [syplugin-anMCPServer](https://github.com/OpaqueGlass/syplugin-anMCPServer "GitHub Repo")).
+2. Start the web GUI with the `opencode web` command.
+3. Download the latest release from GitHub.
+4. Extract it into SiYuan’s `data/plugins` folder.
+5. Enable “AI CLI Bridge” under Settings → Plugins.
+6. To use Claude or other CLIs, use the terminal inside OpenCode web.
 
 ## Usage
 
-### Basic Operations
+### Basic operations
 
-- **Open Panel**: Click the AI icon in the sidebar or press `⌥⌘A`
-- **Close Panel**: Click the AI icon again or use the panel close button
-- **Resize**: Drag the panel edge to adjust width/height
+- **Open panel**: Click the AI icon in the sidebar or press `⌥⌘A`.
+- **Close panel**: Click the AI icon again or use the panel’s close button.
+- **Resize**: Drag the panel edge to change width or height.
 
-### Configuration Options
+### Configuration
 
-Configure in Settings → Plugins → AI CLI Bridge:
+Under Settings → Plugins → AI CLI Bridge:
 
-| Option                 | Description                    | Default                |
-| ---------------------- | ------------------------------ | ---------------------- |
-| Enable AI Agent Dock   | Whether to show sidebar panel  | Enabled                |
-| OpenCode URL           | Web URL to embed               | http://localhost:4096  |
-| Dock Position          | Panel position (Left/Right/Bottom) | Right              |
-| Drag & Drop ID Transfer Method | How to transfer ID when dragging | Both                |
-| Enable Logging         | Enable debug logging           | Enabled                |
+| Option                       | Description                              | Default                |
+| ---------------------------- | --------------------------------------- | ---------------------- |
+| Enable AI Agent Dock        | Show the sidebar panel                   | On                     |
+| OpenCode URL                 | URL of the embedded page                 | http://localhost:4096  |
+| Dock Position               | Panel position (Left / Right / Bottom)   | Right                  |
+| Drag & drop ID transfer     | How to pass ID when dragging blocks/docs | Use both               |
+| Enable Logging              | Enable debug logging                     | On                     |
 
-### Recommended Setups
+### Suggested setups
 
 **Local OpenCode**
 
@@ -56,7 +56,7 @@ OpenCode URL: http://localhost:4096
 OpenCode URL: http://localhost:3000
 ```
 
-**ChatGPT Web** (if accessible)
+**ChatGPT in browser** (if available)
 
 ```
 OpenCode URL: https://chat.openai.com
@@ -80,5 +80,5 @@ MIT License
 
 ## Support
 
-- Issue Reports: [GitHub Issues](https://github.com/opencode/siyuan-ai-agent-bridge/issues)
-- Community Discussion: [SiYuan Community](https://ld246.com/tag/siyuan)
+- Issues: [GitHub Issues](https://github.com/yangtaihong59/siyuan-plugins-ai-cli-bridge/issues)
+- Community: [SiYuan Community](https://ld246.com/tag/siyuan)

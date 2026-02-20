@@ -2,10 +2,11 @@
   "name": "siyuan-plugins-ai-cli-bridge",
   "author": "Taihong Yang",
   "url": "https://github.com/yangtaihong59/siyuan-plugins-ai-cli-bridge",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "minAppVersion": "2.9.0",
   "backends": ["all"],
   "frontends": ["all"],
+  "disabledInPublish": true,
   "displayName": {
     "default": "AI CLI Bridge",
     "zh_CN": "AI Cli Bridge"

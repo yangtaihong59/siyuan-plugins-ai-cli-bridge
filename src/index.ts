@@ -1,6 +1,5 @@
-import { Plugin, Dialog, Menu, showMessage } from "siyuan";
+import { Plugin, Dialog, showMessage } from "siyuan";
 import { SiYuanAPI, APIResponse } from "./siyuan-bridge-api";
-import "./index.scss";
 
 const STORAGE_NAME = "ai-agent-bridge-config";
 const DOCK_TYPE = "ai-dock";
@@ -77,6 +76,13 @@ export default class AIAgentBridgePlugin extends Plugin {
         // 清理资源
     }
 
+    uninstall() {
+        // 卸载插件时删除插件数据
+        this.removeData(STORAGE_NAME).catch(e => {
+            showMessage(`uninstall [${this.name}] remove data [${STORAGE_NAME}] fail: ${e.msg}`);
+        });
+    }
+
     private async loadConfig() {
         const stored = await this.loadData(STORAGE_NAME);
         if (stored) this.config = { ...this.config, ...stored };
@@ -138,7 +144,7 @@ export default class AIAgentBridgePlugin extends Plugin {
                 position: "RightTop",
                 size: { width: 300, height: 0 },
                 icon: "iconAI",
-                title: "AI Agent",
+                title: this.i18n.dockTitle ?? "AI Agent",
                 hotkey: DOCK_HOTKEY,
                 show: true,
             },
@@ -147,13 +153,243 @@ export default class AIAgentBridgePlugin extends Plugin {
             init(dock: any) {
                 dock.element.style.width = "100%";
                 dock.element.style.height = "100%";
+                dock.element.style.minWidth = "200px";
+                dock.element.style.minHeight = "180px";
                 dock.element.style.overflow = "hidden";
+                dock.element.style.position = "relative";
+                dock.element.style.boxSizing = "border-box";
+                dock.element.style.border = "1px solid var(--b3-border-color)";
+                dock.element.style.borderRadius = "4px";
                 
-                const iframe = document.createElement("iframe");
-                iframe.src = plugin.config.openCodeUrl;
-                iframe.style.cssText = "width: 100%; height: 100%; border: none; display: block; pointer-events: auto; will-change: auto;";
-                iframe.setAttribute("allow", "clipboard-read; clipboard-write");
-                dock.element.appendChild(iframe);
+                // 创建初始提示容器（请打开 OpenCode）
+                const waitingContainer = document.createElement("div");
+                waitingContainer.className = "ai-dock-waiting";
+                waitingContainer.style.cssText = "display: flex; position: absolute; top: 0; left: 0; width: 100%; height: 100%; flex-direction: column; align-items: center; justify-content: center; padding: 20px; text-align: center; color: var(--b3-theme-on-surface); background-color: var(--b3-theme-background); z-index: 10;";
+                waitingContainer.innerHTML = `
+                    <svg style="width: 48px; height: 48px; margin-bottom: 16px; opacity: 0.6;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="12" cy="12" r="10"></circle>
+                        <line x1="12" y1="8" x2="12" y2="12"></line>
+                        <line x1="12" y1="16" x2="12.01" y2="16"></line>
+                    </svg>
+                    <div style="font-size: 16px; font-weight: 500; margin-bottom: 8px;">${plugin.i18n.iframeWaiting ?? "Please open OpenCode"}</div>
+                    <div style="font-size: 14px; opacity: 0.7; margin-bottom: 16px;">${plugin.i18n.iframeWaitingDesc ?? "Waiting for OpenCode service to start..."}</div>
+                    <div style="font-size: 12px; opacity: 0.5; font-family: monospace; word-break: break-all;">${plugin.config.openCodeUrl}</div>
+                `;
+                
+                // 创建错误提示容器（链接失败）
+                const errorContainer = document.createElement("div");
+                errorContainer.className = "ai-dock-error";
+                errorContainer.style.cssText = "display: none; position: absolute; top: 0; left: 0; width: 100%; height: 100%; flex-direction: column; align-items: center; justify-content: center; padding: 20px; text-align: center; color: var(--b3-theme-on-surface); background-color: var(--b3-theme-background); z-index: 11;";
+                
+                // 创建重试按钮
+                const retryButton = document.createElement("button");
+                retryButton.className = "b3-button b3-button--outline";
+                retryButton.style.cssText = "margin-top: 16px;";
+                retryButton.textContent = plugin.i18n.retry ?? "Retry";
+                
+                errorContainer.innerHTML = `
+                    <svg style="width: 48px; height: 48px; margin-bottom: 16px; opacity: 0.6;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="12" cy="12" r="10"></circle>
+                        <line x1="12" y1="8" x2="12" y2="12"></line>
+                        <line x1="12" y1="16" x2="12.01" y2="16"></line>
+                    </svg>
+                    <div style="font-size: 16px; font-weight: 500; margin-bottom: 8px;">${plugin.i18n.iframeLoadError ?? "Failed to load page"}</div>
+                    <div style="font-size: 14px; opacity: 0.7; margin-bottom: 16px;">${plugin.i18n.iframeLoadErrorDesc ?? "Please check if the OpenCode URL is correct or if the service is running"}</div>
+                    <div style="font-size: 12px; opacity: 0.5; font-family: monospace; word-break: break-all; margin-bottom: 16px;">${plugin.config.openCodeUrl}</div>
+                `;
+                errorContainer.appendChild(retryButton);
+                
+                // 先显示等待提示和错误容器
+                dock.element.appendChild(waitingContainer);
+                dock.element.appendChild(errorContainer);
+                
+                // 延迟创建 iframe，确保等待容器先显示
+                let iframe: HTMLIFrameElement | null = null;
+                let loadTimeout: ReturnType<typeof setTimeout> | null = null;
+                let retryInterval: ReturnType<typeof setInterval> | null = null;
+                let hasLoaded = false;
+                let isRetrying = false;
+                
+                // 清理函数，存储在 dock.element 上以便 destroy 访问
+                const cleanup = () => {
+                    if (loadTimeout) {
+                        clearTimeout(loadTimeout);
+                        loadTimeout = null;
+                    }
+                    if (retryInterval) {
+                        clearInterval(retryInterval);
+                        retryInterval = null;
+                    }
+                };
+                (dock.element as any).__aiBridgeCleanup = cleanup;
+                
+                const createIframe = () => {
+                    if (iframe) return; // 如果已创建，不再重复创建
+
+                    // 先检测服务是否可用，再创建 iframe
+                    showWaiting();
+
+                    checkServiceAvailable().then((available) => {
+                        if (!available) {
+                            // 服务不可用，显示错误并开始重试
+                            showError();
+                            startRetry();
+                            return;
+                        }
+
+                        // 服务可用，创建 iframe
+                        iframe = document.createElement("iframe");
+                        iframe.src = plugin.config.openCodeUrl;
+                        iframe.style.cssText = "width: 100%; height: 100%; border: none; display: none; pointer-events: auto; will-change: auto; position: relative; z-index: 0;";
+                        iframe.setAttribute("allow", "clipboard-read; clipboard-write");
+
+                        let iframeLoaded = false;
+
+                        // 监听 iframe 加载事件
+                        iframe.onload = () => {
+                            iframeLoaded = true;
+                            hasLoaded = true;
+                            if (loadTimeout) {
+                                clearTimeout(loadTimeout);
+                                loadTimeout = null;
+                            }
+                            if (retryInterval) {
+                                clearInterval(retryInterval);
+                                retryInterval = null;
+                            }
+                            isRetrying = false;
+                            // 跨域情况下，如果能触发 onload，通常表示加载成功
+                            showIframe();
+                        };
+
+                        // 监听 iframe 错误事件
+                        iframe.onerror = () => {
+                            hasLoaded = false;
+                            if (loadTimeout) {
+                                clearTimeout(loadTimeout);
+                                loadTimeout = null;
+                            }
+                            showError();
+                            startRetry();
+                        };
+
+                        dock.element.appendChild(iframe);
+
+                        // 设置超时检测（5秒后如果还没加载成功，切换到错误状态）
+                        loadTimeout = setTimeout(() => {
+                            if (!iframeLoaded && iframe) {
+                                showError();
+                                startRetry();
+                            }
+                        }, 5000);
+                    });
+                };
+                
+                const showWaiting = () => {
+                    if (iframe) iframe.style.display = "none";
+                    waitingContainer.style.display = "flex";
+                    errorContainer.style.display = "none";
+                };
+
+                const showError = () => {
+                    if (iframe) iframe.style.display = "none";
+                    waitingContainer.style.display = "none";
+                    errorContainer.style.display = "flex";
+                };
+
+                const showIframe = () => {
+                    if (iframe) {
+                        iframe.style.display = "block";
+                        waitingContainer.style.display = "none";
+                        errorContainer.style.display = "none";
+                    }
+                };
+                
+                // 检测服务是否可用 - 使用图片加载方式避免 CORS 问题
+                const checkServiceAvailable = (): Promise<boolean> => {
+                    return new Promise((resolve) => {
+                        const img = new Image();
+                        const timeout = setTimeout(() => {
+                            img.src = '';
+                            resolve(false);
+                        }, 2000);
+
+                        img.onload = () => {
+                            clearTimeout(timeout);
+                            resolve(true);
+                        };
+
+                        img.onerror = () => {
+                            clearTimeout(timeout);
+                            // 图片加载错误可能是 CORS 或 404，但服务可能在运行
+                            // 我们尝试用 fetch 再确认一次
+                            fetch(plugin.config.openCodeUrl, {
+                                method: 'HEAD',
+                                mode: 'no-cors',
+                                cache: 'no-cache'
+                            }).then(() => {
+                                resolve(true);
+                            }).catch(() => {
+                                resolve(false);
+                            });
+                        };
+
+                        // 添加随机参数避免缓存
+                        img.src = `${plugin.config.openCodeUrl}/favicon.ico?_t=${Date.now()}`;
+                    });
+                };
+                
+                // 开始重连检测
+                const startRetry = () => {
+                    if (retryInterval || isRetrying) return;
+                    isRetrying = true;
+
+                    retryInterval = setInterval(() => {
+                        if (hasLoaded) {
+                            if (retryInterval) {
+                                clearInterval(retryInterval);
+                                retryInterval = null;
+                            }
+                            isRetrying = false;
+                            return;
+                        }
+
+                        checkServiceAvailable().then((available) => {
+                            if (available && !hasLoaded) {
+                                // 服务可用，重新创建 iframe
+                                if (retryInterval) {
+                                    clearInterval(retryInterval);
+                                    retryInterval = null;
+                                }
+                                isRetrying = false;
+                                hasLoaded = false;
+                                if (iframe) {
+                                    iframe.remove();
+                                    iframe = null;
+                                }
+                                createIframe();
+                            }
+                        });
+                    }, 3000); // 每3秒检测一次
+                };
+                
+                // 重试按钮点击事件
+                retryButton.addEventListener("click", () => {
+                    if (retryInterval) {
+                        clearInterval(retryInterval);
+                        retryInterval = null;
+                    }
+                    isRetrying = false;
+                    hasLoaded = false;
+                    if (iframe) {
+                        iframe.remove();
+                        iframe = null;
+                    }
+                    createIframe();
+                });
+                
+                // 立即开始检测并创建 iframe
+                createIframe();
                 
                 // 优化 resize 性能：拖拽时禁用 iframe 交互以减少重绘
                 let resizeTimer: ReturnType<typeof setTimeout> | null = null;
@@ -214,7 +450,12 @@ export default class AIAgentBridgePlugin extends Plugin {
                     }
                 });
             },
-            destroy() {
+            destroy(dock: any) {
+                // 清理所有定时器
+                const cleanup = dock?.element?.__aiBridgeCleanup;
+                if (cleanup && typeof cleanup === 'function') {
+                    cleanup();
+                }
                 console.log("[AI Agent Bridge] dock destroyed");
             },
         });
