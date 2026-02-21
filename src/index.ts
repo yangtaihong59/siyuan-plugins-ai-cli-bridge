@@ -18,6 +18,8 @@ interface PluginConfig {
 export default class AIAgentBridgePlugin extends Plugin {
     public api!: SiYuanAPI;
     private dockCreated = false;
+    /** 插件卸载时调用的 dock 清理函数，由 createDock 注册 */
+    private dockCleanup: (() => void) | null = null;
     private config: PluginConfig = {
         enableLogging: true,
         openCodeUrl: "http://localhost:4096",
@@ -73,7 +75,10 @@ export default class AIAgentBridgePlugin extends Plugin {
     }
 
     async onunload() {
-        // 清理资源
+        if (this.dockCleanup) {
+            this.dockCleanup();
+            this.dockCleanup = null;
+        }
     }
 
     uninstall() {
@@ -209,19 +214,6 @@ export default class AIAgentBridgePlugin extends Plugin {
                 let retryInterval: ReturnType<typeof setInterval> | null = null;
                 let hasLoaded = false;
                 let isRetrying = false;
-                
-                // 清理函数，存储在 dock.element 上以便 destroy 访问
-                const cleanup = () => {
-                    if (loadTimeout) {
-                        clearTimeout(loadTimeout);
-                        loadTimeout = null;
-                    }
-                    if (retryInterval) {
-                        clearInterval(retryInterval);
-                        retryInterval = null;
-                    }
-                };
-                (dock.element as any).__aiBridgeCleanup = cleanup;
                 
                 const createIframe = () => {
                     if (iframe) return; // 如果已创建，不再重复创建
@@ -396,20 +388,24 @@ export default class AIAgentBridgePlugin extends Plugin {
                 let isResizing = false;
                 
                 const handleResizeStart = () => {
+                    if (!iframe) return;
                     if (!isResizing) {
                         isResizing = true;
                         iframe.style.pointerEvents = "none";
                         iframe.style.willChange = "auto";
                     }
                 };
-                
+
                 const handleResizeEnd = () => {
+                    if (!iframe) return;
                     isResizing = false;
                     // 延迟恢复交互，确保 resize 完成
                     if (resizeTimer) clearTimeout(resizeTimer);
                     resizeTimer = setTimeout(() => {
-                        iframe.style.pointerEvents = "auto";
-                        iframe.style.willChange = "auto";
+                        if (iframe) {
+                            iframe.style.pointerEvents = "auto";
+                            iframe.style.willChange = "auto";
+                        }
                     }, 150);
                 };
                 
@@ -424,36 +420,58 @@ export default class AIAgentBridgePlugin extends Plugin {
                 });
                 
                 resizeObserver.observe(dock.element);
-                
+
                 // 监听鼠标事件，检测拖拽边缘
                 let isDragging = false;
+                const handleMouseUp = () => {
+                    if (isDragging) {
+                        isDragging = false;
+                        handleResizeEnd();
+                    }
+                };
                 dock.element.addEventListener("mousedown", (e: MouseEvent) => {
-                    // 检查是否在拖拽边缘
                     const rect = dock.element.getBoundingClientRect();
                     const edgeThreshold = 5;
-                    const isNearEdge = 
+                    const isNearEdge =
                         e.clientX <= rect.left + edgeThreshold ||
                         e.clientX >= rect.right - edgeThreshold ||
                         e.clientY <= rect.top + edgeThreshold ||
                         e.clientY >= rect.bottom - edgeThreshold;
-                    
                     if (isNearEdge) {
                         isDragging = true;
                         handleResizeStart();
                     }
                 });
-                
-                document.addEventListener("mouseup", () => {
-                    if (isDragging) {
-                        isDragging = false;
-                        handleResizeEnd();
+                document.addEventListener("mouseup", handleMouseUp);
+
+                // 统一清理：定时器、重连、iframe、ResizeObserver、全局事件，供 destroy 与 onunload 调用
+                const cleanup = () => {
+                    if (loadTimeout) {
+                        clearTimeout(loadTimeout);
+                        loadTimeout = null;
                     }
-                });
+                    if (retryInterval) {
+                        clearInterval(retryInterval);
+                        retryInterval = null;
+                    }
+                    if (resizeTimer) {
+                        clearTimeout(resizeTimer);
+                        resizeTimer = null;
+                    }
+                    resizeObserver.disconnect();
+                    document.removeEventListener("mouseup", handleMouseUp);
+                    if (iframe) {
+                        iframe.src = "about:blank";
+                        iframe.remove();
+                        iframe = null;
+                    }
+                };
+                (dock.element as any).__aiBridgeCleanup = cleanup;
+                plugin.dockCleanup = cleanup;
             },
-            destroy(dock: any) {
-                // 清理所有定时器
-                const cleanup = dock?.element?.__aiBridgeCleanup;
-                if (cleanup && typeof cleanup === 'function') {
+            destroy() {
+                const cleanup = (this as any)?.element?.__aiBridgeCleanup;
+                if (cleanup && typeof cleanup === "function") {
                     cleanup();
                 }
                 console.log("[AI Agent Bridge] dock destroyed");

@@ -1,6 +1,6 @@
 # AI CLI Bridge for SiYuan
 
-[English](README.md) | [中文](README_zh_CN.md)
+[English](https://github.com/yangtaihong59/siyuan-plugins-ai-cli-bridge/blob/main/README.md) | [中文](https://github.com/yangtaihong59/siyuan-plugins-ai-cli-bridge/blob/main/README_zh_CN.md)
 
 Embed OpenCode, Claude Code, and other AI CLI tools as a sidebar panel in SiYuan, and use them with MCP to operate your notes automatically.
 

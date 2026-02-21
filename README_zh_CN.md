@@ -1,6 +1,6 @@
 # AI Cli Bridge for SiYuan
 
-[English](README.md) | [中文](README_zh_CN.md)
+[English](https://github.com/yangtaihong59/siyuan-plugins-ai-cli-bridge/blob/main/README.md) | [中文](https://github.com/yangtaihong59/siyuan-plugins-ai-cli-bridge/blob/main/README_zh_CN.md)
 
 将 Opencode Claude code 等 AI Cli 作为侧边栏面板使用，配合 MCP 帮你自动操作笔记。
 
