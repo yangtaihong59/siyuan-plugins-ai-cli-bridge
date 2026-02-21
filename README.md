@@ -2,9 +2,7 @@
 
 [English](https://github.com/yangtaihong59/siyuan-plugins-ai-cli-bridge/blob/main/README.md) | [中文](https://github.com/yangtaihong59/siyuan-plugins-ai-cli-bridge/blob/main/README_zh_CN.md)
 
-Embed OpenCode, Claude Code, and other AI CLI tools as a sidebar panel in SiYuan, and use them with MCP to operate your notes automatically.
-
-Recommended to use with the [syplugin-anMCPServer](https://github.com/OpaqueGlass/syplugin-anMCPServer "GitHub Repo") plugin, or [siyuan-plugins-mcp-sisyphus](https://github.com/yangtaihong59/siyuan-plugins-mcp-sisyphus).
+Embed Openclaw, OpenCode, Claude Code and other AI CLI tools as a sidebar panel in SiYuan.
 
 ## Features
 
@@ -15,12 +13,9 @@ Recommended to use with the [syplugin-anMCPServer](https://github.com/OpaqueGlas
 
 ## Installation
 
-1. Install OpenCode and a SiYuan MCP tool (e.g. [syplugin-anMCPServer](https://github.com/OpaqueGlass/syplugin-anMCPServer "GitHub Repo")).
-2. Start the web GUI with the `opencode web` command.
-3. Download the latest release from GitHub.
-4. Extract it into SiYuan’s `data/plugins` folder.
-5. Enable “AI CLI Bridge” under Settings → Plugins.
-6. To use Claude or other CLIs, use the terminal inside OpenCode web.
+1. Install OpenCode or another AI web UI and start it (e.g. `opencode web`).
+2. Download the latest release from GitHub and extract it into SiYuan's `data/plugins` folder.
+3. Enable "AI CLI Bridge" under Settings → Plugins.
 
 ## Usage
 
@@ -34,15 +29,17 @@ Recommended to use with the [syplugin-anMCPServer](https://github.com/OpaqueGlas
 
 Under Settings → Plugins → AI CLI Bridge:
 
-| Option                       | Description                              | Default                |
-| ---------------------------- | --------------------------------------- | ---------------------- |
-| Enable AI Agent Dock        | Show the sidebar panel                   | On                     |
-| OpenCode URL                 | URL of the embedded page                 | http://localhost:4096  |
-| Dock Position               | Panel position (Left / Right / Bottom)   | Right                  |
-| Drag & drop ID transfer     | How to pass ID when dragging blocks/docs | Use both               |
-| Enable Logging              | Enable debug logging                     | On                     |
+| Option | Description              | Default                |
+| ------ | ------------------------ | ---------------------- |
+| URL    | URL of the embedded page | http://localhost:4096  |
 
 ### Suggested setups
+
+**Local Openclaw**
+
+```
+Use the address provided by openclaw dashboard
+```
 
 **Local OpenCode**
 

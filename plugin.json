@@ -2,7 +2,7 @@
   "name": "siyuan-plugins-ai-cli-bridge",
   "author": "Taihong Yang",
   "url": "https://github.com/yangtaihong59/siyuan-plugins-ai-cli-bridge",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "minAppVersion": "2.9.0",
   "backends": ["all"],
   "frontends": ["all"],
@@ -12,8 +12,8 @@
     "zh_CN": "AI Cli Bridge"
   },
   "description": {
-    "default": "Embed OpenCode or other AI Cli tools into SiYuan as a sidebar panel, working with MCP to help you automatically operate notes.",
-    "zh_CN": "将 OpenCode 等 AI Cli 作为侧边栏面板使用，配合 MCP 帮你自动操作笔记。"
+    "default": "Embed AI Agent Web (OpenCode、Openclaw、Claude Code) or other AI tools into SiYuan as a sidebar panel, working with MCP to help you automatically operate notes.",
+    "zh_CN": "将 AI Agent Web (OpenCode、Openclaw、Claude Code) 等 AI 工具作为侧边栏面板使用，配合 MCP 帮你自动操作笔记。"
   },
   "readme": {
     "default": "README.md",
@@ -22,7 +22,6 @@
   "keywords": [
     "AI",
     "Agent",
-    "OpenCode",
     "CLI",
     "sidebar",
     "dock",

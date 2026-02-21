@@ -1,5 +1,4 @@
 import { Plugin, Dialog, showMessage } from "siyuan";
-import { SiYuanAPI, APIResponse } from "./siyuan-bridge-api";
 
 const STORAGE_NAME = "ai-agent-bridge-config";
 const DOCK_TYPE = "ai-dock";
@@ -7,7 +6,6 @@ const DOCK_HOTKEY = "⌥⌘A";
 type DockPosition = "LeftTop" | "LeftBottom" | "RightTop" | "RightBottom" | "BottomLeft" | "BottomRight" | "Left" | "Right" | "Bottom";
 
 interface PluginConfig {
-    enableLogging: boolean;
     openCodeUrl: string;
     dockPosition: DockPosition;
     dockWidth: number;
@@ -16,12 +14,10 @@ interface PluginConfig {
 }
 
 export default class AIAgentBridgePlugin extends Plugin {
-    public api!: SiYuanAPI;
     private dockCreated = false;
     /** 插件卸载时调用的 dock 清理函数，由 createDock 注册 */
     private dockCleanup: (() => void) | null = null;
     private config: PluginConfig = {
-        enableLogging: true,
         openCodeUrl: "http://localhost:4096",
         dockPosition: "Right",
         dockWidth: 320,
@@ -30,7 +26,6 @@ export default class AIAgentBridgePlugin extends Plugin {
     };
 
     async onload() {
-        this.api = new SiYuanAPI(this);
         await this.loadConfig();
         
         // 注册 AI 图标
@@ -166,7 +161,7 @@ export default class AIAgentBridgePlugin extends Plugin {
                 dock.element.style.border = "1px solid var(--b3-border-color)";
                 dock.element.style.borderRadius = "4px";
                 
-                // 创建初始提示容器（请打开 OpenCode）
+                // 创建初始提示容器（请打开 AI Agent Web）
                 const waitingContainer = document.createElement("div");
                 waitingContainer.className = "ai-dock-waiting";
                 waitingContainer.style.cssText = "display: flex; position: absolute; top: 0; left: 0; width: 100%; height: 100%; flex-direction: column; align-items: center; justify-content: center; padding: 20px; text-align: center; color: var(--b3-theme-on-surface); background-color: var(--b3-theme-background); z-index: 10;";
@@ -176,9 +171,9 @@ export default class AIAgentBridgePlugin extends Plugin {
                         <line x1="12" y1="8" x2="12" y2="12"></line>
                         <line x1="12" y1="16" x2="12.01" y2="16"></line>
                     </svg>
-                    <div style="font-size: 16px; font-weight: 500; margin-bottom: 8px;">${plugin.i18n.iframeWaiting ?? "Please open OpenCode"}</div>
-                    <div style="font-size: 14px; opacity: 0.7; margin-bottom: 16px;">${plugin.i18n.iframeWaitingDesc ?? "Waiting for OpenCode service to start..."}</div>
-                    <div style="font-size: 12px; opacity: 0.5; font-family: monospace; word-break: break-all;">${plugin.config.openCodeUrl}</div>
+                    <div style="font-size: 16px; font-weight: 500; margin-bottom: 8px;">${plugin.i18n.iframeWaiting ?? "Please open AI Agent Web"}</div>
+                    <div style="font-size: 14px; opacity: 0.7; margin-bottom: 16px;">${plugin.i18n.iframeWaitingDesc ?? "Waiting for AI Agent Web to start..."}</div>
+                    <div class="ai-dock-url" style="font-size: 12px; opacity: 0.5; font-family: monospace; word-break: break-all;"></div>
                 `;
                 
                 // 创建错误提示容器（链接失败）
@@ -199,8 +194,8 @@ export default class AIAgentBridgePlugin extends Plugin {
                         <line x1="12" y1="16" x2="12.01" y2="16"></line>
                     </svg>
                     <div style="font-size: 16px; font-weight: 500; margin-bottom: 8px;">${plugin.i18n.iframeLoadError ?? "Failed to load page"}</div>
-                    <div style="font-size: 14px; opacity: 0.7; margin-bottom: 16px;">${plugin.i18n.iframeLoadErrorDesc ?? "Please check if the OpenCode URL is correct or if the service is running"}</div>
-                    <div style="font-size: 12px; opacity: 0.5; font-family: monospace; word-break: break-all; margin-bottom: 16px;">${plugin.config.openCodeUrl}</div>
+                    <div style="font-size: 14px; opacity: 0.7; margin-bottom: 16px;">${plugin.i18n.iframeLoadErrorDesc ?? "Please check if the AI Agent Web URL is correct or if the service is running"}</div>
+                    <div class="ai-dock-url" style="font-size: 12px; opacity: 0.5; font-family: monospace; word-break: break-all; margin-bottom: 16px;"></div>
                 `;
                 errorContainer.appendChild(retryButton);
                 
@@ -279,6 +274,8 @@ export default class AIAgentBridgePlugin extends Plugin {
                 
                 const showWaiting = () => {
                     if (iframe) iframe.style.display = "none";
+                    const urlEl = waitingContainer.querySelector(".ai-dock-url");
+                    if (urlEl) urlEl.textContent = plugin.config.openCodeUrl;
                     waitingContainer.style.display = "flex";
                     errorContainer.style.display = "none";
                 };
@@ -286,6 +283,8 @@ export default class AIAgentBridgePlugin extends Plugin {
                 const showError = () => {
                     if (iframe) iframe.style.display = "none";
                     waitingContainer.style.display = "none";
+                    const urlEl = errorContainer.querySelector(".ai-dock-url");
+                    if (urlEl) urlEl.textContent = plugin.config.openCodeUrl;
                     errorContainer.style.display = "flex";
                 };
 
@@ -503,104 +502,16 @@ export default class AIAgentBridgePlugin extends Plugin {
             panel.appendChild(row);
         };
 
-        const enableDock = document.createElement("input");
-        enableDock.type = "checkbox";
-        enableDock.checked = this.config.enableDock;
-        enableDock.className = "b3-switch";
-        enableDock.addEventListener("change", async () => {
-            this.config.enableDock = enableDock.checked;
-            await this.saveConfig();
-            showMessage(this.i18n.restartRequired ?? "Please restart plugin to apply changes");
-        });
-        addRow(this.i18n.enableDock ?? "Enable AI Agent Dock", this.i18n.enableDockDesc, enableDock);
-
         const openCodeUrl = document.createElement("input");
         openCodeUrl.type = "text";
         openCodeUrl.className = "b3-text-field fn__block";
         openCodeUrl.value = this.config.openCodeUrl;
-        openCodeUrl.placeholder = "http://localhost:4096";
+        openCodeUrl.placeholder = "https://example.com";
         openCodeUrl.addEventListener("change", async () => {
             this.config.openCodeUrl = openCodeUrl.value;
             await this.saveConfig();
             showMessage(this.i18n.restartRequired ?? "Please restart plugin to apply changes");
         });
-        addRow(this.i18n.openCodeUrl ?? "OpenCode URL", this.i18n.openCodeUrlDesc, openCodeUrl);
-
-        const dockPosition = document.createElement("select");
-        dockPosition.className = "b3-select fn__block";
-        (["LeftTop", "LeftBottom", "RightTop", "RightBottom", "BottomLeft", "BottomRight", "Left", "Right", "Bottom"] as DockPosition[]).forEach((pos) => {
-            const opt = document.createElement("option");
-            opt.value = pos;
-            opt.textContent = pos;
-            if (pos === this.config.dockPosition) opt.selected = true;
-            dockPosition.appendChild(opt);
-        });
-        dockPosition.addEventListener("change", async () => {
-            this.config.dockPosition = dockPosition.value as DockPosition;
-            await this.saveConfig();
-            showMessage(this.i18n.restartRequired ?? "Please restart plugin to apply changes");
-        });
-        addRow(this.i18n.dockPosition ?? "Dock Position", this.i18n.dockPositionDesc, dockPosition);
-
-        const enableLogging = document.createElement("input");
-        enableLogging.type = "checkbox";
-        enableLogging.checked = this.config.enableLogging;
-        enableLogging.className = "b3-switch";
-        enableLogging.addEventListener("change", async () => {
-            this.config.enableLogging = enableLogging.checked;
-            await this.saveConfig();
-        });
-        addRow(this.i18n.enableLogging ?? "Enable Logging", undefined, enableLogging);
-    }
-
-    public async executeCommand(command: string, params: any): Promise<APIResponse> {
-        if (this.config.enableLogging) console.log(`[AI Agent Bridge] Executing: ${command}`, params);
-        try {
-            switch (command) {
-                case "notebooks.list": return await this.api.getNotebooks();
-                case "notebooks.create": return await this.api.createNotebook(params.name);
-                case "notebooks.rename": return await this.api.renameNotebook(params.id, params.name);
-                case "notebooks.delete": return await this.api.removeNotebook(params.id);
-                case "notebooks.open": return await this.api.openNotebook(params.id);
-                case "notebooks.close": return await this.api.closeNotebook(params.id);
-                case "docs.list": return await this.api.getDocsByNotebook(params.notebookId, params.path);
-                case "docs.create": return await this.api.createDoc(params.notebookId, params.path, params.content);
-                case "docs.get": return await this.api.getDocContent(params.id);
-                case "docs.rename": return await this.api.renameDoc(params.notebookId, params.path, params.newName);
-                case "docs.delete": return await this.api.deleteDoc(params.notebookId, params.path);
-                case "docs.move": return await this.api.moveDocs(params.srcNotebooks, params.srcPaths, params.destNotebook, params.destPath);
-                case "blocks.get": return await this.api.getBlockById(params.id);
-                case "blocks.getKramdown": return await this.api.getBlockKramdown(params.id);
-                case "blocks.insert": return await this.api.insertBlock(params.parentId, params.dataType, params.data, params.previousId);
-                case "blocks.prepend": return await this.api.prependBlock(params.parentId, params.dataType, params.data);
-                case "blocks.append": return await this.api.appendBlock(params.parentId, params.dataType, params.data);
-                case "blocks.update": return await this.api.updateBlock(params.id, params.dataType, params.data);
-                case "blocks.delete": return await this.api.deleteBlock(params.id);
-                case "blocks.move": return await this.api.moveBlock(params.id, params.parentId, params.previousId);
-                case "blocks.fold": return await this.api.foldBlock(params.id);
-                case "blocks.unfold": return await this.api.unfoldBlock(params.id);
-                case "attrs.get": return await this.api.getBlockAttrs(params.blockId);
-                case "attrs.set": return await this.api.setBlockAttrs(params.blockId, params.attrs);
-                case "search.blocks": return await this.api.searchBlock(params.query, params.notebook, params.type);
-                case "search.sql": return await this.api.searchEmbedBlock(params.sql, params.embedBlockId, params.excludeIDs);
-                case "query.sql": return await this.api.querySQL(params.sql);
-                case "assets.upload": return await this.api.uploadAsset(params.file);
-                case "files.get": return await this.api.getFile(params.path);
-                case "files.put": return await this.api.putFile(params.path, params.file, params.isDir, params.modTime);
-                case "files.delete": return await this.api.removeFile(params.path);
-                case "files.list": return await this.api.readDir(params.path);
-                case "system.info": return await this.api.getSystemConf();
-                case "system.version": return await this.api.version();
-                case "system.time": return await this.api.getCurrentTime();
-                default: return { code: 400, msg: `Unknown command: ${command}` };
-            }
-        } catch (error: any) {
-            console.error(`[AI Agent Bridge] Error executing ${command}:`, error);
-            return { code: 500, msg: error.message };
-        }
-    }
-
-    public getConfig(): PluginConfig {
-        return { ...this.config };
+        addRow(this.i18n.openCodeUrl ?? "AI Agent Web URL", this.i18n.openCodeUrlDesc, openCodeUrl);
     }
 }
