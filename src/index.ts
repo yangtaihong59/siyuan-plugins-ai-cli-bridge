@@ -388,7 +388,7 @@ export default class AIAgentBridgePlugin extends Plugin {
                 let isResizing = false;
                 
                 const handleResizeStart = () => {
-                    if (!iframe) return;
+                    if (!iframe?.style) return;
                     if (!isResizing) {
                         isResizing = true;
                         iframe.style.pointerEvents = "none";
@@ -397,27 +397,24 @@ export default class AIAgentBridgePlugin extends Plugin {
                 };
 
                 const handleResizeEnd = () => {
-                    if (!iframe) return;
+                    if (!iframe?.style) return;
                     isResizing = false;
-                    // 延迟恢复交互，确保 resize 完成
                     if (resizeTimer) clearTimeout(resizeTimer);
                     resizeTimer = setTimeout(() => {
-                        if (iframe) {
+                        if (iframe?.style) {
                             iframe.style.pointerEvents = "auto";
                             iframe.style.willChange = "auto";
                         }
                     }, 150);
                 };
-                
-                // 监听 dock 容器的 resize 事件
-                const resizeObserver = new ResizeObserver(() => {
+
+                const handleResizeObserver = () => {
                     handleResizeStart();
-                    // 重置定时器，防抖处理
                     if (resizeTimer) clearTimeout(resizeTimer);
-                    resizeTimer = setTimeout(() => {
-                        handleResizeEnd();
-                    }, 100);
-                });
+                    resizeTimer = setTimeout(handleResizeEnd, 100);
+                };
+
+                const resizeObserver = new ResizeObserver(handleResizeObserver);
                 
                 resizeObserver.observe(dock.element);
 
