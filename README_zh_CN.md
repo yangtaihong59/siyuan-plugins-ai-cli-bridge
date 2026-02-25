@@ -2,7 +2,9 @@
 
 [English](https://github.com/yangtaihong59/siyuan-plugins-ai-cli-bridge/blob/main/README.md) | [中文](https://github.com/yangtaihong59/siyuan-plugins-ai-cli-bridge/blob/main/README_zh_CN.md)
 
-将 Openclaw、OpenCode、Claude Code 等 AI Cli 作为侧边栏面板嵌入思源。
+将 Openclaw Opencode Claude code 等 AI Cli 作为侧边栏面板使用，配合 MCP 帮你自动操作笔记。
+
+建议配合 [syplugin-anMCPServer](https://github.com/OpaqueGlass/syplugin-anMCPServer "GitHub Repo") 插件使用，或者我自制的 [siyuan-plugins-mcp-sisyphus](https://github.com/yangtaihong59/siyuan-plugins-mcp-sisyphus)。
 
 ## 功能特性
 
@@ -13,9 +15,12 @@
 
 ## 安装方法
 
-1. 安装 OpenCode 或其它 AI 网页端，并使用其 web 命令启动（如 `opencode web`）
-2. 从 GitHub 下载最新版本，解压到思源的 `data/plugins` 目录
-3. 在 设置 → 插件 中启用「AI CLI Bridge」
+1. 你需要安装有Opencode，以及 SiYuan 的 MCP 工具（推荐 [syplugin-anMCPServer](https://github.com/OpaqueGlass/syplugin-anMCPServer "GitHub Repo") ）
+2. 使用 opencode web 命名启动其web GUI
+3. 从 GitHub 下载最新版本
+4. 解压到思源的 `data/plugins` 目录
+5. 在 设置 → 插件 中启用 "AI CLI Bridge"
+6. 如果你需要打开 claude 等其他 cli，可以使用 Opencode web 自带的终端
 
 ## 使用说明
 
