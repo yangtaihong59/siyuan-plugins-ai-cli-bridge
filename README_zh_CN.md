@@ -2,25 +2,25 @@
 
 [English](https://github.com/yangtaihong59/siyuan-plugins-ai-cli-bridge/blob/main/README.md) | [中文](https://github.com/yangtaihong59/siyuan-plugins-ai-cli-bridge/blob/main/README_zh_CN.md)
 
-将 Openclaw Opencode Claude code 等 AI Cli 作为侧边栏面板使用，配合 MCP 帮你自动操作笔记。
+> 推荐搭配：[SiYuan MCP Sisyphus](https://github.com/yangtaihong59/siyuan-plugins-mcp-sisyphus)。如需让侧边栏里的 AI 工具通过 MCP 操作思源笔记，可以额外安装它。
 
-建议配合 [syplugin-anMCPServer](https://github.com/OpaqueGlass/syplugin-anMCPServer "GitHub Repo") 插件使用，或者我自制的 [siyuan-plugins-mcp-sisyphus](https://github.com/yangtaihong59/siyuan-plugins-mcp-sisyphus)。
+将任意 AI Agent Web 页面或其他网页工具加载到思源侧边栏中使用。插件本身只负责嵌入网页，不要求必须安装 OpenCode；如需通过 MCP 操作笔记，可按需搭配相关插件或服务。
 
 ## 功能特性
 
 - **侧边栏集成**: 在思源笔记中添加可固定的 AI Agent 面板
-- **自定义 URL**: 支持配置任意基于 Web 的 AI 工具（OpenCode、本地 LLM UI 等）
+- **自定义 URL**: 支持配置任意网页地址（OpenCode、本地 LLM UI、ChatGPT 等）
 - **灵活布局**: 可将面板放置在左侧/右侧/底部，并自由调整大小
 - **快捷键支持**: 使用 `⌥⌘A` (Mac) 或 `Alt+Ctrl+A` (Windows/Linux) 快速打开面板
 
 ## 安装方法
 
-1. 你需要安装有Opencode，以及 SiYuan 的 MCP 工具（推荐 [syplugin-anMCPServer](https://github.com/OpaqueGlass/syplugin-anMCPServer "GitHub Repo") ）
-2. 使用 opencode web 命名启动其web GUI
-3. 从 GitHub 下载最新版本
-4. 解压到思源的 `data/plugins` 目录
-5. 在 设置 → 插件 中启用 "AI CLI Bridge"
-6. 如果你需要打开 claude 等其他 cli，可以使用 Opencode web 自带的终端
+商城直接下载或者
+1. 从 GitHub 下载最新版本。
+2. 解压到思源的 `data/plugins` 目录。
+3. 在 设置 → 插件 中启用 "AI CLI Bridge"。
+4. 打开插件设置，填入你想嵌入侧边栏的网页地址。
+5. 如果该网页服务需要单独启动，请先在本地或远程启动对应服务。
 
 ## 使用说明
 
@@ -40,25 +40,27 @@
 
 ### 推荐配置
 
-**本地 Opclaw**
+插件本身不提供 AI 服务，也不自带网页界面；它只会加载你配置的 URL。
+
+**示例：本地 Openclaw**
 
 ```
  openclaw dashboard 提供的地址
 ```
 
-**本地 OpenCode**
+**示例：本地 OpenCode**
 
 ```
 OpenCode URL: http://localhost:4096
 ```
 
-**本地 Ollama Web UI**
+**示例：本地 Ollama Web UI**
 
 ```
 OpenCode URL: http://localhost:3000
 ```
 
-**ChatGPT 网页版**（如可访问）
+**示例：ChatGPT 网页版**（如可访问）
 
 ```
 OpenCode URL: https://chat.openai.com
@@ -79,6 +81,12 @@ pnpm dev
 ## 开源协议
 
 MIT License
+
+## 版本历史
+
+- **v0.1.8** (2025-04-08) - 修复 iframe 空值检查，优化卸载时资源清理，更新文档链接
+- **v0.1.7** (2025-04-07) - 同步 README 文档
+- **v0.1.6** (2025-04-07) - 移除 MCP 功能，仅保留侧边栏嵌入核心功能
 
 ## 技术支持
 
