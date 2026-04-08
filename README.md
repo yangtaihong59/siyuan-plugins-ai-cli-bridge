@@ -11,6 +11,7 @@ Load any AI Agent web page or other web tool into the SiYuan sidebar. This plugi
 - **Sidebar integration**: Add a dockable AI Agent panel in SiYuan
 - **Custom URL**: Configure any web page URL (OpenCode, local LLM UI, ChatGPT, etc.)
 - **Flexible layout**: Place the panel on the left, right, or bottom and resize it
+- **Block ID drag bridge**: Drag a SiYuan block onto a text input inside the embedded page and pass the block ID as plain text when the page accepts native drops
 - **Shortcuts**: Open the panel with `⌥⌘A` (Mac) or `Alt+Ctrl+A` (Windows/Linux)
 
 ## Installation
@@ -29,6 +30,13 @@ Load any AI Agent web page or other web tool into the SiYuan sidebar. This plugi
 - **Open panel**: Click the AI icon in the sidebar or press `⌥⌘A`.
 - **Close panel**: Click the AI icon again or use the panel’s close button.
 - **Resize**: Drag the panel edge to change width or height.
+- **Drop block IDs**: Drag a SiYuan block onto a text input in the embedded page. If that page supports native text drops, it receives the block ID.
+
+### Drag-and-drop limits
+
+- This feature only enriches native drag data; it does not control iframe DOM across origins.
+- The target page must support text drops on its own input field.
+- Compatibility with third-party web apps is not guaranteed.
 
 ### Configuration
 
@@ -84,7 +92,8 @@ MIT License
 
 ## Version History
 
-- **v0.1.8** (2025-04-08) - Fixed iframe null check in ResizeObserver, optimized resource cleanup on unload, updated documentation links
+- **v0.1.9** (2026-04-08) - Added drag-and-drop support: drop a SiYuan block onto a text input in the embedded page to insert the block ID
+- **v0.1.8** (2026-04-08) - Fixed iframe null check in ResizeObserver, optimized resource cleanup on unload, updated documentation links
 - **v0.1.7** (2025-04-07) - Synchronized README documentation
 - **v0.1.6** (2025-04-07) - Removed MCP features, keeping core sidebar embedding only
 

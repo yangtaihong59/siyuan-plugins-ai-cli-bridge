@@ -1,6 +1,6 @@
 {
   "name": "siyuan-plugins-ai-cli-bridge",
-  "version": "0.1.8",
+  "version": "0.1.9",
   "type": "module",
   "description": "Enable AI agents to view and modify SiYuan notes via HTTP API and sidebar panel",
   "repository": "",

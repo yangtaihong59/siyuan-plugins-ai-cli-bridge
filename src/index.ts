@@ -3,6 +3,8 @@ import { Plugin, Dialog, showMessage } from "siyuan";
 const STORAGE_NAME = "ai-agent-bridge-config";
 const DOCK_TYPE = "ai-dock";
 const DOCK_HOTKEY = "⌥⌘A";
+const BLOCK_ID_TEXT_TYPE = "text/siyuan-block-id";
+const BLOCK_ID_PATTERN = /\b\d{14}-[0-9a-z]{7}\b/i;
 type DockPosition = "LeftTop" | "LeftBottom" | "RightTop" | "RightBottom" | "BottomLeft" | "BottomRight" | "Left" | "Right" | "Bottom";
 
 interface PluginConfig {
@@ -12,6 +14,42 @@ interface PluginConfig {
     dockHeight: number;
     enableDock: boolean;
 }
+
+const extractBlockIdFromText = (value: string | null | undefined) => {
+    if (!value) return null;
+    const matched = value.match(BLOCK_ID_PATTERN);
+    return matched ? matched[0] : null;
+};
+
+const getBlockIdFromElement = (target: EventTarget | null) => {
+    if (!(target instanceof Element)) return null;
+    const blockEl = target.closest("[data-node-id]");
+    return blockEl?.getAttribute("data-node-id") ?? null;
+};
+
+const getBlockIdFromDataTransfer = (dataTransfer: DataTransfer | null) => {
+    if (!dataTransfer) return null;
+
+    const preferredTypes = [
+        BLOCK_ID_TEXT_TYPE,
+        "application/x-siyuan-node-id",
+        "application/x-siyuan-block-id",
+        "text/plain",
+        "text/uri-list",
+        "text/html",
+    ];
+
+    for (const type of preferredTypes) {
+        try {
+            const blockId = extractBlockIdFromText(dataTransfer.getData(type));
+            if (blockId) return blockId;
+        } catch (error) {
+            console.debug("[AI Agent Bridge] Failed reading drag data type:", type, error);
+        }
+    }
+
+    return null;
+};
 
 export default class AIAgentBridgePlugin extends Plugin {
     private dockCreated = false;
@@ -160,6 +198,11 @@ export default class AIAgentBridgePlugin extends Plugin {
                 dock.element.style.boxSizing = "border-box";
                 dock.element.style.border = "1px solid var(--b3-border-color)";
                 dock.element.style.borderRadius = "4px";
+
+                const dropHint = document.createElement("div");
+                dropHint.className = "ai-dock-drop-hint";
+                dropHint.style.cssText = "display: none; position: absolute; inset: 0; pointer-events: none; z-index: 12; border: 2px dashed var(--b3-theme-primary); border-radius: 4px; background: color-mix(in srgb, var(--b3-theme-primary) 10%, transparent); color: var(--b3-theme-primary); font-size: 14px; font-weight: 500; align-items: center; justify-content: center; text-align: center; padding: 16px; box-sizing: border-box;";
+                dropHint.textContent = plugin.i18n.dragDropHint ?? "Drop onto a text input in the web page to paste the block ID";
                 
                 // 创建初始提示容器（请打开 AI Agent Web）
                 const waitingContainer = document.createElement("div");
@@ -202,6 +245,7 @@ export default class AIAgentBridgePlugin extends Plugin {
                 // 先显示等待提示和错误容器
                 dock.element.appendChild(waitingContainer);
                 dock.element.appendChild(errorContainer);
+                dock.element.appendChild(dropHint);
                 
                 // 延迟创建 iframe，确保等待容器先显示
                 let iframe: HTMLIFrameElement | null = null;
@@ -209,6 +253,58 @@ export default class AIAgentBridgePlugin extends Plugin {
                 let retryInterval: ReturnType<typeof setInterval> | null = null;
                 let hasLoaded = false;
                 let isRetrying = false;
+                let dockDragDepth = 0;
+                let activeDragBlockId: string | null = null;
+
+                const showDropHint = () => {
+                    if (!activeDragBlockId) return;
+                    dropHint.style.display = "flex";
+                };
+
+                const hideDropHint = () => {
+                    dockDragDepth = 0;
+                    dropHint.style.display = "none";
+                };
+
+                const handleGlobalDragStart = (event: DragEvent) => {
+                    const blockId = getBlockIdFromElement(event.target) ?? getBlockIdFromDataTransfer(event.dataTransfer);
+                    if (!blockId || !event.dataTransfer) {
+                        activeDragBlockId = null;
+                        return;
+                    }
+
+                    activeDragBlockId = blockId;
+                    try {
+                        event.dataTransfer.setData("text/plain", blockId);
+                        event.dataTransfer.setData(BLOCK_ID_TEXT_TYPE, blockId);
+                    } catch (error) {
+                        console.warn("[AI Agent Bridge] Failed to enrich drag data:", error);
+                    }
+                };
+
+                const handleGlobalDragEnd = () => {
+                    activeDragBlockId = null;
+                    hideDropHint();
+                };
+
+                const handleDockDragEnter = () => {
+                    if (!activeDragBlockId) return;
+                    dockDragDepth += 1;
+                    showDropHint();
+                };
+
+                const handleDockDragLeave = () => {
+                    if (!activeDragBlockId) return;
+                    dockDragDepth = Math.max(0, dockDragDepth - 1);
+                    if (dockDragDepth === 0) {
+                        hideDropHint();
+                    }
+                };
+
+                const handleDockDrop = () => {
+                    hideDropHint();
+                    activeDragBlockId = null;
+                };
                 
                 const createIframe = () => {
                     if (iframe) return; // 如果已创建，不再重复创建
@@ -229,6 +325,9 @@ export default class AIAgentBridgePlugin extends Plugin {
                         iframe.src = plugin.config.openCodeUrl;
                         iframe.style.cssText = "width: 100%; height: 100%; border: none; display: none; pointer-events: auto; will-change: auto; position: relative; z-index: 0;";
                         iframe.setAttribute("allow", "clipboard-read; clipboard-write");
+                        iframe.addEventListener("dragenter", handleDockDragEnter);
+                        iframe.addEventListener("dragleave", handleDockDragLeave);
+                        iframe.addEventListener("drop", handleDockDrop);
 
                         let iframeLoaded = false;
 
@@ -355,6 +454,9 @@ export default class AIAgentBridgePlugin extends Plugin {
                                 isRetrying = false;
                                 hasLoaded = false;
                                 if (iframe) {
+                                    iframe.removeEventListener("dragenter", handleDockDragEnter);
+                                    iframe.removeEventListener("dragleave", handleDockDragLeave);
+                                    iframe.removeEventListener("drop", handleDockDrop);
                                     iframe.remove();
                                     iframe = null;
                                 }
@@ -373,6 +475,9 @@ export default class AIAgentBridgePlugin extends Plugin {
                     isRetrying = false;
                     hasLoaded = false;
                     if (iframe) {
+                        iframe.removeEventListener("dragenter", handleDockDragEnter);
+                        iframe.removeEventListener("dragleave", handleDockDragLeave);
+                        iframe.removeEventListener("drop", handleDockDrop);
                         iframe.remove();
                         iframe = null;
                     }
@@ -439,6 +544,11 @@ export default class AIAgentBridgePlugin extends Plugin {
                     }
                 });
                 document.addEventListener("mouseup", handleMouseUp);
+                document.addEventListener("dragstart", handleGlobalDragStart, true);
+                document.addEventListener("dragend", handleGlobalDragEnd, true);
+                dock.element.addEventListener("dragenter", handleDockDragEnter);
+                dock.element.addEventListener("dragleave", handleDockDragLeave);
+                dock.element.addEventListener("drop", handleDockDrop);
 
                 // 统一清理：定时器、重连、iframe、ResizeObserver、全局事件，供 destroy 与 onunload 调用
                 const cleanup = () => {
@@ -456,7 +566,17 @@ export default class AIAgentBridgePlugin extends Plugin {
                     }
                     resizeObserver.disconnect();
                     document.removeEventListener("mouseup", handleMouseUp);
+                    document.removeEventListener("dragstart", handleGlobalDragStart, true);
+                    document.removeEventListener("dragend", handleGlobalDragEnd, true);
+                    dock.element.removeEventListener("dragenter", handleDockDragEnter);
+                    dock.element.removeEventListener("dragleave", handleDockDragLeave);
+                    dock.element.removeEventListener("drop", handleDockDrop);
+                    hideDropHint();
+                    activeDragBlockId = null;
                     if (iframe) {
+                        iframe.removeEventListener("dragenter", handleDockDragEnter);
+                        iframe.removeEventListener("dragleave", handleDockDragLeave);
+                        iframe.removeEventListener("drop", handleDockDrop);
                         iframe.src = "about:blank";
                         iframe.remove();
                         iframe = null;

@@ -2,7 +2,7 @@
   "name": "siyuan-plugins-ai-cli-bridge",
   "author": "Taihong Yang",
   "url": "https://github.com/yangtaihong59/siyuan-plugins-ai-cli-bridge",
-  "version": "0.1.8",
+  "version": "0.1.9",
   "minAppVersion": "2.9.0",
   "backends": ["all"],
   "frontends": ["all"],
@@ -12,8 +12,8 @@
     "zh_CN": "AI Cli Bridge"
   },
   "description": {
-    "default": "Embed any AI Agent web page or other web tool into SiYuan as a sidebar panel. MCP pairing is optional.",
-    "zh_CN": "将任意 AI Agent 网页或其他网页工具嵌入思源侧边栏中使用；是否搭配 MCP 可按需选择。"
+    "default": "Embed any AI Agent web page or other web tool into SiYuan as a sidebar panel. Drag blocks from SiYuan to pass IDs into web inputs. MCP pairing is optional.",
+    "zh_CN": "将任意 AI Agent 网页嵌入思源侧边栏；支持拖拽思源块到网页输入框传递块 ID；搭配 MCP 可按需选择。"
   },
   "readme": {
     "default": "README.md",

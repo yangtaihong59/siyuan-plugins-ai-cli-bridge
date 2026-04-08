@@ -1,11 +1,38 @@
-.idea
-.vscode
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build outputs
+dist/
+build/
+dev/
+package/
+*.zip
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# OS
 .DS_Store
-pnpm-lock.yaml
-package-lock.json
-package.zip
-node_modules
-dev
-dist
-build
-tmp
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+
+# Environment
+.env
+.env.local
+
+# TypeScript
+*.tsbuildinfo
+
+# Vite
+*.timestamp-*.mjs
+
+# Temp
+tmp/
+temp/
+.cache/
