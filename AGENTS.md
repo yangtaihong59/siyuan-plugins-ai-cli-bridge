@@ -13,3 +13,5 @@
 - 图标源为 icon.svg，icon.png 为160px渲染，dock symbol 在src/brand.ts。
 
 开发用 `pnpm dev` watch 到 dev；`pnpm make-link` 保留工作区选择并不覆盖旧安装。提交/发布前运行 `pnpm check`、`pnpm test`、`pnpm build`。发布包不能含真实会话、凭据、node_modules、.live-results 或 sourcemap。不要将假服务/SSR/CJS宿主检查写成真实模型或原生UI验收。
+
+- 打开自定义dock必须使用 `this.name + DOCK_TYPE`。思源3.8.7按该完整类型查 `.dock__item` 后直接getAttribute，传裸type会崩溃。由实际dock.elements包含图标来定位归属，不信任保存的旧位置；图标未就绪/卸载时不调用宿主toggleModel。最终CJS验收必须真实执行该路径，不能用空layout跳过。

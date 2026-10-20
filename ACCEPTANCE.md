@@ -1,3 +1,12 @@
+# 0.2.1 修复验收
+
+日期：2026-10-21，Asia/Singapore。
+
+- 直接读取本机思源3.8.7宿主源码，确认addDock实际类型为plugin.name+options.type，而旧openDock传了裸ai-dock。旧最终CJS在模拟真实宿主的querySelector/getAttribute路径精确复现用户错误；不是iframe内部异常。
+- 修复为完整类型，按实际dock.elements中的图标归属定位，按钮未就绪或插件已卸载时不调用toggleModel。新的最终CJS契约覆盖Web保存后打开、首开未实例化、移动至底部、命令回调、缺按钮与卸载保护，旧构建失败、修复构建通过。
+- 在用户当前思源3.8.7桌面端通过集市UI停用/启用加载dev软链接中的修复，实际点通Harness设置→打开网页面板→本机已有Web页面成功显示→Harness返回。没有发送聊天、创建Web会话或修改笔记；原Web URL保留。原生成功截图仅裁取侧栏，不包含笔记内容：docs/images/siyuan-3.8.7-web-fixed.png。
+- 原生快捷键受思源内置属性命令冲突影响，本轮不更改用户键位；快捷命令回调本身由最终CJS契约验证，不能写成原生快捷键验收通过。
+
 # 0.2.0 集成版验收
 
 日期：2026-10-20，Asia/Singapore。

@@ -150,10 +150,17 @@ export default class DeepSeekHarnessPlugin extends Plugin {
   }
 
   private openDock() {
+    if (this.disposed) return false;
+    const type = this.name + DOCK_TYPE;
     const layout = (window as any).siyuan?.layout;
-    const position = this.config.dockPosition;
-    const dock = position.startsWith('Left') ? layout?.leftDock : position.startsWith('Bottom') ? layout?.bottomDock : layout?.rightDock;
-    dock?.toggleModel?.(DOCK_TYPE, true, false, false, true);
+    const button = document.querySelector(`.dock__item[data-type="${type}"]`);
+    if (!button) return false;
+    // Follow the registered icon when the user moves it to another dock.
+    const dock = [layout?.leftDock, layout?.rightDock, layout?.bottomDock]
+      .find(item => item?.elements?.some((group: HTMLElement) => group.contains(button)));
+    if (!dock?.toggleModel) return false;
+    dock.toggleModel(type, true, false, false, true);
+    return true;
   }
   private trackEditor = (event: CustomEvent<any>) => {
     const protyle = event.detail?.protyle;
