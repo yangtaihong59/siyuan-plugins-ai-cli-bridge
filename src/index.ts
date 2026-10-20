@@ -1,637 +1,293 @@
-import { Plugin, Dialog, showMessage } from "siyuan";
+import { Plugin, Dialog, showMessage, confirm, getAllEditor, getFrontend } from 'siyuan';
+import Chat from './ui/Chat.svelte';
+import { ChatController } from './controller';
+import type { NoteReference } from './types';
+import { isSiYuanId } from './references';
+import { captureNotebookDrag } from './notebook-drag';
+import { ICON_ID, ICON_SYMBOL } from './brand';
+import { normalizeShellConfig, validateWebUrl, type PanelView } from './shell-config';
+import { mountWebPanel } from './web-panel';
+import './index.scss';
 
-const STORAGE_NAME = "ai-agent-bridge-config";
-const DOCK_TYPE = "ai-dock";
-const DOCK_HOTKEY = "⌥⌘A";
-const BLOCK_ID_TEXT_TYPE = "text/siyuan-block-id";
-const BLOCK_ID_PATTERN = /\b\d{14}-[0-9a-z]{7}\b/i;
-type DockPosition = "LeftTop" | "LeftBottom" | "RightTop" | "RightBottom" | "BottomLeft" | "BottomRight" | "Left" | "Right" | "Bottom";
+const STORAGE_NAME = 'ai-agent-bridge-config';
+const DOCK_TYPE = 'ai-dock';
+const DOCK_HOTKEY = '⌥⌘A';
+const escapeHtml = (value: string) => value.replace(/[&<>"']/g, c => ({'&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;'}[c]!));
+export default class DeepSeekHarnessPlugin extends Plugin {
+  private controller: ChatController | null = null;
+  private controllerSetup: Promise<void> | null = null;
+  private components = new Set<Chat>();
+  private panels = new Map<HTMLElement, { component?: Chat; cleanup?: () => void }>();
+  private config = normalizeShellConfig(null);
+  private canHarness = false;
+  private switching = false;
+  private disposed = false;
+  private settingsRequested = false;
+  private activeNoteId = '';
+  private selection: NoteReference | null = null;
+  private unsubscribe: (() => void) | null = null;
 
-interface PluginConfig {
-    openCodeUrl: string;
-    dockPosition: DockPosition;
-    dockWidth: number;
-    dockHeight: number;
-    enableDock: boolean;
-}
-
-const extractBlockIdFromText = (value: string | null | undefined) => {
-    if (!value) return null;
-    const matched = value.match(BLOCK_ID_PATTERN);
-    return matched ? matched[0] : null;
-};
-
-const getBlockIdFromElement = (target: EventTarget | null) => {
-    if (!(target instanceof Element)) return null;
-    const blockEl = target.closest("[data-node-id]");
-    return blockEl?.getAttribute("data-node-id") ?? null;
-};
-
-const getBlockIdFromDataTransfer = (dataTransfer: DataTransfer | null) => {
-    if (!dataTransfer) return null;
-
-    const preferredTypes = [
-        BLOCK_ID_TEXT_TYPE,
-        "application/x-siyuan-node-id",
-        "application/x-siyuan-block-id",
-        "text/plain",
-        "text/uri-list",
-        "text/html",
-    ];
-
-    for (const type of preferredTypes) {
-        try {
-            const blockId = extractBlockIdFromText(dataTransfer.getData(type));
-            if (blockId) return blockId;
-        } catch (error) {
-            console.debug("[AI Agent Bridge] Failed reading drag data type:", type, error);
-        }
+  async onload() {
+    this.disposed = false;
+    const saved = await this.loadData(STORAGE_NAME);
+    if (this.disposed) return;
+    this.config = normalizeShellConfig(saved);
+    this.canHarness = ['desktop', 'desktop-window'].includes(getFrontend()) && typeof require === 'function';
+    this.addIcons(ICON_SYMBOL);
+    if (this.canHarness && this.config.view === 'harness') await this.ensureController();
+    if (this.disposed) return;
+    const plugin = this;
+    this.addDock({
+      config: { position: this.config.dockPosition, size: { width: this.config.dockWidth, height: this.config.dockHeight },
+        icon: ICON_ID, title: 'SiYuan DeepSeek Harness', hotkey: DOCK_HOTKEY, show: this.config.enableDock },
+      type: DOCK_TYPE, data: {},
+      init() { if (plugin.disposed) return; plugin.panels.set(this.element as HTMLElement, {}); plugin.renderPanel(this.element as HTMLElement); },
+      destroy() { plugin.clearPanel(this.element as HTMLElement); plugin.panels.delete(this.element as HTMLElement); },
+    });
+    this.addCommand({ langKey: 'openAIAgentDock', hotkey: DOCK_HOTKEY, callback: () => this.openDock() });
+    if (this.canHarness) {
+      this.eventBus.on('switch-protyle', this.trackEditor);
+      this.eventBus.on('loaded-protyle-dynamic', this.trackEditor);
+      this.eventBus.on('loaded-protyle-static', this.trackEditor);
+      document.addEventListener('selectionchange', this.trackSelection);
+      document.addEventListener('dragstart', this.trackNotebookDrag);
     }
+  }
 
-    return null;
-};
+  private async ensureController() {
+    if (this.controllerSetup) return this.controllerSetup;
+    this.controllerSetup = (async () => {
+      const controller = new ChatController({
+        loadData: name => this.loadData(name === 'state.json' ? 'harness-state.json' : name),
+        saveData: (name, value) => this.saveData(name === 'state.json' ? 'harness-state.json' : name, value),
+        getCurrentNote: () => this.getCurrentNote(), getSelection: async () => {
+          if (!this.selection) throw new Error('请先在笔记正文中选中一段文字，再点“选区”。');
+          return { ...this.selection };
+        },
+        appendToNote: text => this.appendToNote(text), notify: message => showMessage(message),
+        getWorkspaceDirectory: () => (window as any).siyuan?.config?.system?.workspaceDir || '',
+        getReference: id => this.getReference(id),
+        getNotebookReference: id => this.getNotebookReference(id),
+        chooseWorkingDirectory: async () => {
+          const os = require('node:os') as typeof import('node:os');
+          const current = this.controller?.state.settings.cwd || os.homedir();
+          const result = await require('electron').ipcRenderer.invoke('siyuan-get', {
+            cmd: 'showOpenDialog', title: '选择 Agent 工作目录',
+            defaultPath: current.replace(/^~(?=$|[/\\])/, os.homedir()), properties: ['openDirectory'],
+          });
+          return !result.canceled && typeof result.filePaths?.[0] === 'string' ? result.filePaths[0] : undefined;
+        },
+      });
+      this.controller = controller;
+      this.unsubscribe = controller.subscribe(state => { for (const component of this.components) component.$set({ state }); });
+      try {
+        await controller.initialize();
+        if (this.disposed) { await controller.destroy(); return; }
+        await this.discoverMcp();
+      } catch (error) {
+        this.unsubscribe?.(); this.unsubscribe = null;
+        if (this.controller === controller) this.controller = null;
+        await controller.destroy().catch(() => {});
+        throw error;
+      }
+    })().catch(error => { this.controllerSetup = null; throw error; });
+    return this.controllerSetup;
+  }
 
-export default class AIAgentBridgePlugin extends Plugin {
-    private dockCreated = false;
-    /** 插件卸载时调用的 dock 清理函数，由 createDock 注册 */
-    private dockCleanup: (() => void) | null = null;
-    private config: PluginConfig = {
-        openCodeUrl: "http://localhost:4096",
-        dockPosition: "Right",
-        dockWidth: 320,
-        dockHeight: 500,
-        enableDock: true,
+  private clearPanel(element: HTMLElement) {
+    const panel = this.panels.get(element);
+    panel?.cleanup?.();
+    if (panel?.component) { panel.component.$destroy(); this.components.delete(panel.component); }
+    element.replaceChildren();
+    this.panels.set(element, {});
+  }
+
+  private renderPanel(element: HTMLElement) {
+    if (this.disposed) return;
+    this.clearPanel(element);
+    element.classList.add('dsh-dock');
+    const view = this.canHarness ? this.config.view : 'web';
+    if (view === 'harness' && this.controller) {
+      const component = new Chat({ target: element, props: { controller: this.controller, state: this.controller.state,
+        webPanel: { url: this.config.openCodeUrl, onOpen: (url: string) => this.setView('web', url) } } });
+      this.components.add(component); this.panels.set(element, { component });
+      if (this.settingsRequested) { component.openSettings(); this.settingsRequested = false; }
+      return;
+    }
+    const shell = document.createElement('div'); shell.className = 'dsh-web-shell';
+    const bar = document.createElement('div'); bar.className = 'dsh-web-bar';
+    const title = document.createElement('span'); title.textContent = '网页面板'; bar.append(title);
+    if (this.canHarness) {
+      const back = document.createElement('button'); back.textContent = 'Harness'; back.title = '返回 Harness 对话';
+      back.onclick = () => { void this.setView('harness').catch(error => showMessage(error.message, 6000, 'error')); };
+      bar.append(back);
+    }
+    const settings = document.createElement('button'); settings.textContent = '设置'; settings.onclick = () => this.openSetting(); bar.append(settings);
+    const content = document.createElement('div'); content.className = 'dsh-web-content';
+    shell.append(bar, content); element.append(shell);
+    this.panels.set(element, { cleanup: mountWebPanel(content, { url: this.config.openCodeUrl, i18n: this.i18n || {} }) });
+  }
+
+  private async setView(view: PanelView, url = this.config.openCodeUrl) {
+    if (this.switching) throw new Error('正在切换面板，请稍后。');
+    if (this.controller?.state.busy) throw new Error('请先停止当前生成，再切换面板。');
+    if (view === 'harness' && !this.canHarness) throw new Error('Harness 需要思源桌面端与本机运行环境；当前可使用网页面板。');
+    const next = { ...this.config, view, openCodeUrl: validateWebUrl(url) };
+    this.switching = true;
+    for (const element of this.panels.keys()) element.inert = true;
+    try {
+      if (view === 'harness') await this.ensureController();
+      else await this.controller?.disconnect();
+      if (this.disposed) return;
+      if (this.controller?.state.busy) throw new Error('请先停止当前生成，再切换面板。');
+      await this.saveData(STORAGE_NAME, next);
+      if (this.disposed) return;
+      if (this.controller?.state.busy) throw new Error('生成已开始，请停止后重试切换。');
+      this.config = next;
+      for (const element of this.panels.keys()) this.renderPanel(element);
+      this.openDock();
+    } finally { for (const element of this.panels.keys()) element.inert = false; this.switching = false; }
+  }
+
+  private openDock() {
+    const layout = (window as any).siyuan?.layout;
+    const position = this.config.dockPosition;
+    const dock = position.startsWith('Left') ? layout?.leftDock : position.startsWith('Bottom') ? layout?.bottomDock : layout?.rightDock;
+    dock?.toggleModel?.(DOCK_TYPE, true, false, false, true);
+  }
+  private trackEditor = (event: CustomEvent<any>) => {
+    const protyle = event.detail?.protyle;
+    const id = protyle?.block?.rootID || protyle?.block?.id;
+    if (typeof id === 'string') this.activeNoteId = id;
+  };
+  private trackNotebookDrag = (event: DragEvent) => {
+    if (this.config.view !== 'harness') return;
+    captureNotebookDrag(event, (window as any).siyuan?.config?.system?.workspaceDir || '');
+  };
+  private trackSelection = () => {
+    const selection = window.getSelection();
+    if (!selection || selection.isCollapsed || !selection.toString().trim()) return;
+    const element = selection.anchorNode?.nodeType === Node.ELEMENT_NODE ? selection.anchorNode as Element : selection.anchorNode?.parentElement;
+    const editor = element?.closest('.protyle');
+    if (!editor || element?.closest('.dsh-dock')) return;
+    const block = element?.closest('[data-node-id]') as HTMLElement | null;
+    const text = selection.toString();
+    this.selection = { id: `selection-${Date.now()}`, title: `选区 · ${block?.dataset.nodeId || '正文'}`, kind: 'selection', text: text.slice(0, 12000), truncated: text.length > 12000 };
+  };
+  private async api(endpoint: string, data: unknown) {
+    const response = await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+    if (!response.ok) throw new Error(`思源 API HTTP ${response.status}`);
+    const value = await response.json();
+    if (value.code !== 0) throw new Error(value.msg || `思源 API 错误 ${value.code}`);
+    return value.data;
+  }
+  private currentId() {
+    if (this.activeNoteId) return this.activeNoteId;
+    const editors = getAllEditor();
+    const editor = editors.find(item => item.protyle?.element && !item.protyle.element.closest('.fn__none')) || editors[0];
+    const id = editor?.protyle?.block?.rootID || editor?.protyle?.block?.id;
+    if (!id) throw new Error('请先打开一篇思源文档。');
+    return id;
+  }
+  private async getCurrentNote(): Promise<NoteReference> { return this.getReference(this.currentId()); }
+  private async getReference(id: string): Promise<NoteReference> {
+    if (!isSiYuanId(id)) throw new Error('无效的思源文档或内容块 ID。');
+    const [rows, content] = await Promise.all([
+      this.api('/api/query/sql', { stmt: `SELECT id, type, content FROM blocks WHERE id = '${id}' LIMIT 1` }),
+      this.api('/api/block/getBlockKramdown', { id }),
+    ]);
+    const row = Array.isArray(rows) ? rows[0] : undefined;
+    if (!row || row.id !== id) throw new Error('文档或内容块已不存在，或当前工作区无法访问。');
+    const text = String(content?.kramdown || '');
+    return { id, title: String(row.content || id).replace(/\s+/g, ' ').slice(0, 80),
+      kind: row.type === 'd' ? 'document' : 'block', text: text.slice(0, 12000), truncated: text.length > 12000 };
+  }
+  private async getNotebookReference(id: string): Promise<NoteReference> {
+    if (!isSiYuanId(id)) throw new Error('无效的思源笔记本 ID。');
+    const result = await this.api('/api/notebook/lsNotebooks', {});
+    const notebook = Array.isArray(result?.notebooks) ? result.notebooks.find((item: any) => item.id === id) : undefined;
+    if (!notebook) throw new Error('笔记本不存在，或当前工作区无法访问。');
+    if (notebook.closed) throw new Error('请先在思源中打开这个笔记本，再拖入引用。');
+    if (notebook.encrypted && notebook.unlocked === false) throw new Error('请先在思源中解锁这个笔记本，再拖入引用。');
+    return { id, kind: 'notebook', title: String(notebook.name || id).replace(/\s+/g, ' ').slice(0, 80),
+      text: '这是笔记本范围引用，尚未读取其中的文档正文。请按本轮任务，通过可用的思源工具检索此笔记本中的文档。' };
+  }
+  private async appendToNote(text: string) {
+    const id = this.currentId();
+    const attrs = await this.api('/api/attr/getBlockAttrs', { id });
+    const accepted = await new Promise<boolean>(resolve => confirm('追加到当前笔记',
+      `将这条回答追加到《${escapeHtml(attrs?.title || id)}》末尾，共 ${text.length} 字符。`, () => resolve(true), () => resolve(false)));
+    if (!accepted) return false;
+    await this.api('/api/block/appendBlock', { parentID: id, dataType: 'markdown', data: text });
+    try { await this.api('/api/ui/reloadProtyle', { id }); }
+    catch { showMessage('内容已写入，界面刷新失败，请重新打开文档。', 6000); return true; }
+    showMessage('已追加到笔记');
+    return true;
+  }
+  private async discoverMcp() {
+    if (!this.controller) return;
+    // Only refresh a previously enabled connection; recommendations never auto-enable tools.
+    if (!this.controller.state.settings.mcpEnabled) return;
+    try {
+      const response = await fetch('/api/file/getFile', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: '/data/storage/petal/siyuan-plugins-mcp-sisyphus/mcpHttpSettings' }) });
+      if (!response.ok) return;
+      const settings = await response.json();
+      if (!settings.enabled || settings.tlsEnabled || !Number.isInteger(settings.port)) return;
+      const current = this.controller.state.settings;
+      const url = `http://127.0.0.1:${settings.port}/mcp`;
+      if (current.mcpEnabled && current.mcpUrl !== url) return;
+      // The token remains in memory; neither the generated patch nor saved chat stores it.
+      await this.controller.saveSettings({ ...current, mcpEnabled: true,
+        mcpUrl: url, mcpToken: settings.authEnabled ? settings.token || '' : '' });
+    } catch (error) { console.info('[DeepSeek Harness] MCP auto-detection unavailable:', error instanceof Error ? error.message : 'unknown'); }
+  }
+  openSetting() {
+    const dialog = new Dialog({ title: 'SiYuan DeepSeek Harness', width: '480px',
+      content: '<div class="dsh-shell-settings" style="display:flex;flex-direction:column;gap:16px;padding:20px"></div>' });
+    const panel = dialog.element.querySelector('.dsh-shell-settings')!;
+    const row = (label: string, control: HTMLElement) => {
+      const item = document.createElement('label'); item.style.cssText = 'display:flex;flex-direction:column;gap:8px';
+      const title = document.createElement('span'); title.textContent = label; item.append(title, control); panel.append(item);
     };
-
-    async onload() {
-        await this.loadConfig();
-        
-        // 注册 AI 图标
-        // 原来的图标（已注释）
-        // this.addIcons(`<symbol id="iconAI" viewBox="0 0 32 32">
-        // <path d="M16 2c-7.732 0-14 6.268-14 14s6.268 14 14 14 14-6.268 14-14-6.268-14-14-14zM16 26c-5.514 0-10-4.486-10-10s4.486-10 10-10 10 4.486 10 10-4.486 10-10 10z"></path>
-        // <path d="M16 8c-0.552 0-1 0.448-1 1v6c0 0.552 0.448 1 1 1s1-0.448 1-1v-6c0-0.552-0.448-1-1-1z"></path>
-        // <path d="M20.5 12.5c-0.276 0-0.5 0.224-0.5 0.5v2c0 0.276 0.224 0.5 0.5 0.5s0.5-0.224 0.5-0.5v-2c0-0.276-0.224-0.5-0.5-0.5z"></path>
-        // <path d="M11.5 12.5c-0.276 0-0.5 0.224-0.5 0.5v2c0 0.276 0.224 0.5 0.5 0.5s0.5-0.224 0.5-0.5v-2c0-0.276-0.224-0.5-0.5-0.5z"></path>
-        // <path d="M12 20c0.8 1.2 2.2 2 3.8 2s3-0.8 3.8-2l-1.2-0.8c-0.5 0.8-1.4 1.3-2.4 1.3s-1.9-0.5-2.4-1.3l-1.2 0.8z"></path>
-        // </symbol>`);
-        
-        // 新的图标：竖着的长方体 [] 样式（宽度加倍）
-        this.addIcons(`<symbol id="iconAI" viewBox="0 0 32 32">
-        <!-- 外框（左侧） -->
-        <rect x="8" y="4" width="2" height="24" rx="0.5" fill="currentColor"/>
-        <!-- 外框（右侧） -->
-        <rect x="22" y="4" width="2" height="24" rx="0.5" fill="currentColor"/>
-        <!-- 外框（顶部） -->
-        <rect x="8" y="4" width="16" height="2" rx="0.5" fill="currentColor"/>
-        <!-- 外框（底部） -->
-        <rect x="8" y="26" width="16" height="2" rx="0.5" fill="currentColor"/>
-        <!-- 内部填充（可选，增加立体感） -->
-        <rect x="10" y="6" width="12" height="20" rx="0.5" fill="currentColor" opacity="0.1"/>
-        </symbol>`);
-        
-        // 在 onload 中创建 Dock
-        if (this.config.enableDock) {
-            this.createDock();
-        }
-
-        this.addCommand({
-            langKey: "openAIAgentDock",
-            hotkey: DOCK_HOTKEY,
-            callback: () => this.openDock(),
-        });
-        
+    const mode = document.createElement('select'); mode.className = 'b3-select'; mode.setAttribute('aria-label', '默认面板');
+    for (const [value, text] of [['harness', 'DeepSeek Harness'], ['web', '网页面板']]) {
+      const option = document.createElement('option'); option.value = value; option.textContent = text;
+      option.disabled = value === 'harness' && !this.canHarness; mode.append(option);
     }
-
-    onLayoutReady() {
-        // 插件加载完成
+    mode.value = this.canHarness ? this.config.view : 'web'; row('默认面板', mode);
+    const url = document.createElement('input'); url.className = 'b3-text-field'; url.type = 'url'; url.value = this.config.openCodeUrl;
+    url.setAttribute('aria-label', '网页地址'); url.placeholder = 'https://example.com'; row('网页地址', url);
+    const actions = document.createElement('div'); actions.style.cssText = 'display:flex;gap:8px;flex-wrap:wrap'; panel.append(actions);
+    const apply = document.createElement('button'); apply.className = 'b3-button'; apply.textContent = '保存并打开'; actions.append(apply);
+    apply.disabled = this.controller?.state.busy || this.switching;
+    apply.onclick = async () => {
+      apply.disabled = true;
+      try { await this.setView(mode.value as PanelView, url.value); dialog.destroy(); }
+      catch (error) { showMessage(error instanceof Error ? error.message : String(error), 6000, 'error'); }
+      finally { apply.disabled = false; }
+    };
+    if (this.canHarness) {
+      const connection = document.createElement('button'); connection.className = 'b3-button b3-button--outline'; connection.textContent = '连接与模型设置';
+      connection.disabled = this.controller?.state.busy || this.switching; actions.append(connection);
+      connection.onclick = async () => {
+        connection.disabled = true;
+        try { this.settingsRequested = true; await this.setView('harness', url.value); dialog.destroy(); }
+        catch (error) { this.settingsRequested = false; showMessage(error instanceof Error ? error.message : String(error), 6000, 'error'); }
+        finally { connection.disabled = false; }
+      };
     }
-
-    async onunload() {
-        if (this.dockCleanup) {
-            this.dockCleanup();
-            this.dockCleanup = null;
-        }
-    }
-
-    uninstall() {
-        // 卸载插件时删除插件数据
-        this.removeData(STORAGE_NAME).catch(e => {
-            showMessage(`uninstall [${this.name}] remove data [${STORAGE_NAME}] fail: ${e.msg}`);
-        });
-    }
-
-    private async loadConfig() {
-        const stored = await this.loadData(STORAGE_NAME);
-        if (stored) this.config = { ...this.config, ...stored };
-    }
-
-    private async saveConfig() {
-        await this.saveData(STORAGE_NAME, this.config);
-    }
-
-    /** 打开 AI Agent 侧边栏 */
-    private openDock() {
-        try {
-            const globalApp = (window as any).siyuan;
-            const layout = globalApp?.layout;
-            
-            if (!layout) {
-                console.warn("[AI Agent Bridge] layout not ready");
-                return false;
-            }
-            
-            const pos = this.config.dockPosition;
-            let targetDock;
-            if (pos.startsWith("Left")) {
-                targetDock = layout.leftDock;
-            } else if (pos.startsWith("Right")) {
-                targetDock = layout.rightDock;
-            } else if (pos.startsWith("Bottom")) {
-                targetDock = layout.bottomDock;
-            }
-            
-            if (!targetDock) {
-                console.warn("[AI Agent Bridge] target dock not found");
-                return false;
-            }
-            
-            // 使用 toggleModel 显示 dock
-            // toggleModel(type, show=true, close=false, hide=false, isSaveLayout=true)
-            if (typeof targetDock.toggleModel === "function") {
-                targetDock.toggleModel(DOCK_TYPE, true, false, false, true);
-                console.log("[AI Agent Bridge] Dock opened");
-                return true;
-            }
-            
-            return false;
-        } catch (e) {
-            console.error("[AI Agent Bridge] openDock failed:", e);
-            return false;
-        }
-    }
-    
-    private createDock() {
-        if (this.dockCreated) return;
-        this.dockCreated = true;
-        
-        const plugin = this;
-        
-        this.addDock({
-            config: {
-                position: "RightTop",
-                size: { width: 300, height: 0 },
-                icon: "iconAI",
-                title: this.i18n.dockTitle ?? "AI Agent",
-                hotkey: DOCK_HOTKEY,
-                show: true,
-            },
-            data: null,
-            type: DOCK_TYPE,
-            init(dock: any) {
-                dock.element.style.width = "100%";
-                dock.element.style.height = "100%";
-                dock.element.style.minWidth = "200px";
-                dock.element.style.minHeight = "180px";
-                dock.element.style.overflow = "hidden";
-                dock.element.style.position = "relative";
-                dock.element.style.boxSizing = "border-box";
-                dock.element.style.border = "1px solid var(--b3-border-color)";
-                dock.element.style.borderRadius = "4px";
-
-                const dropHint = document.createElement("div");
-                dropHint.className = "ai-dock-drop-hint";
-                dropHint.style.cssText = "display: none; position: absolute; inset: 0; pointer-events: none; z-index: 12; border: 2px dashed var(--b3-theme-primary); border-radius: 4px; background: color-mix(in srgb, var(--b3-theme-primary) 10%, transparent); color: var(--b3-theme-primary); font-size: 14px; font-weight: 500; align-items: center; justify-content: center; text-align: center; padding: 16px; box-sizing: border-box;";
-                dropHint.textContent = plugin.i18n.dragDropHint ?? "Drop onto a text input in the web page to paste the block ID";
-                
-                // 创建初始提示容器（请打开 AI Agent Web）
-                const waitingContainer = document.createElement("div");
-                waitingContainer.className = "ai-dock-waiting";
-                waitingContainer.style.cssText = "display: flex; position: absolute; top: 0; left: 0; width: 100%; height: 100%; flex-direction: column; align-items: center; justify-content: center; padding: 20px; text-align: center; color: var(--b3-theme-on-surface); background-color: var(--b3-theme-background); z-index: 10;";
-                waitingContainer.innerHTML = `
-                    <svg style="width: 48px; height: 48px; margin-bottom: 16px; opacity: 0.6;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <circle cx="12" cy="12" r="10"></circle>
-                        <line x1="12" y1="8" x2="12" y2="12"></line>
-                        <line x1="12" y1="16" x2="12.01" y2="16"></line>
-                    </svg>
-                    <div style="font-size: 16px; font-weight: 500; margin-bottom: 8px;">${plugin.i18n.iframeWaiting ?? "Please open AI Agent Web"}</div>
-                    <div style="font-size: 14px; opacity: 0.7; margin-bottom: 16px;">${plugin.i18n.iframeWaitingDesc ?? "Waiting for AI Agent Web to start..."}</div>
-                    <div class="ai-dock-url" style="font-size: 12px; opacity: 0.5; font-family: monospace; word-break: break-all;"></div>
-                `;
-                
-                // 创建错误提示容器（链接失败）
-                const errorContainer = document.createElement("div");
-                errorContainer.className = "ai-dock-error";
-                errorContainer.style.cssText = "display: none; position: absolute; top: 0; left: 0; width: 100%; height: 100%; flex-direction: column; align-items: center; justify-content: center; padding: 20px; text-align: center; color: var(--b3-theme-on-surface); background-color: var(--b3-theme-background); z-index: 11;";
-                
-                // 创建重试按钮
-                const retryButton = document.createElement("button");
-                retryButton.className = "b3-button b3-button--outline";
-                retryButton.style.cssText = "margin-top: 16px;";
-                retryButton.textContent = plugin.i18n.retry ?? "Retry";
-                
-                errorContainer.innerHTML = `
-                    <svg style="width: 48px; height: 48px; margin-bottom: 16px; opacity: 0.6;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <circle cx="12" cy="12" r="10"></circle>
-                        <line x1="12" y1="8" x2="12" y2="12"></line>
-                        <line x1="12" y1="16" x2="12.01" y2="16"></line>
-                    </svg>
-                    <div style="font-size: 16px; font-weight: 500; margin-bottom: 8px;">${plugin.i18n.iframeLoadError ?? "Failed to load page"}</div>
-                    <div style="font-size: 14px; opacity: 0.7; margin-bottom: 16px;">${plugin.i18n.iframeLoadErrorDesc ?? "Please check if the AI Agent Web URL is correct or if the service is running"}</div>
-                    <div class="ai-dock-url" style="font-size: 12px; opacity: 0.5; font-family: monospace; word-break: break-all; margin-bottom: 16px;"></div>
-                `;
-                errorContainer.appendChild(retryButton);
-                
-                // 先显示等待提示和错误容器
-                dock.element.appendChild(waitingContainer);
-                dock.element.appendChild(errorContainer);
-                dock.element.appendChild(dropHint);
-                
-                // 延迟创建 iframe，确保等待容器先显示
-                let iframe: HTMLIFrameElement | null = null;
-                let loadTimeout: ReturnType<typeof setTimeout> | null = null;
-                let retryInterval: ReturnType<typeof setInterval> | null = null;
-                let hasLoaded = false;
-                let isRetrying = false;
-                let dockDragDepth = 0;
-                let activeDragBlockId: string | null = null;
-
-                const showDropHint = () => {
-                    if (!activeDragBlockId) return;
-                    dropHint.style.display = "flex";
-                };
-
-                const hideDropHint = () => {
-                    dockDragDepth = 0;
-                    dropHint.style.display = "none";
-                };
-
-                const handleGlobalDragStart = (event: DragEvent) => {
-                    const blockId = getBlockIdFromElement(event.target) ?? getBlockIdFromDataTransfer(event.dataTransfer);
-                    if (!blockId || !event.dataTransfer) {
-                        activeDragBlockId = null;
-                        return;
-                    }
-
-                    activeDragBlockId = blockId;
-                    try {
-                        event.dataTransfer.setData("text/plain", blockId);
-                        event.dataTransfer.setData(BLOCK_ID_TEXT_TYPE, blockId);
-                    } catch (error) {
-                        console.warn("[AI Agent Bridge] Failed to enrich drag data:", error);
-                    }
-                };
-
-                const handleGlobalDragEnd = () => {
-                    activeDragBlockId = null;
-                    hideDropHint();
-                };
-
-                const handleDockDragEnter = () => {
-                    if (!activeDragBlockId) return;
-                    dockDragDepth += 1;
-                    showDropHint();
-                };
-
-                const handleDockDragLeave = () => {
-                    if (!activeDragBlockId) return;
-                    dockDragDepth = Math.max(0, dockDragDepth - 1);
-                    if (dockDragDepth === 0) {
-                        hideDropHint();
-                    }
-                };
-
-                const handleDockDrop = () => {
-                    hideDropHint();
-                    activeDragBlockId = null;
-                };
-                
-                const createIframe = () => {
-                    if (iframe) return; // 如果已创建，不再重复创建
-
-                    // 先检测服务是否可用，再创建 iframe
-                    showWaiting();
-
-                    checkServiceAvailable().then((available) => {
-                        if (!available) {
-                            // 服务不可用，显示错误并开始重试
-                            showError();
-                            startRetry();
-                            return;
-                        }
-
-                        // 服务可用，创建 iframe
-                        iframe = document.createElement("iframe");
-                        iframe.src = plugin.config.openCodeUrl;
-                        iframe.style.cssText = "width: 100%; height: 100%; border: none; display: none; pointer-events: auto; will-change: auto; position: relative; z-index: 0;";
-                        iframe.setAttribute("allow", "clipboard-read; clipboard-write");
-                        iframe.addEventListener("dragenter", handleDockDragEnter);
-                        iframe.addEventListener("dragleave", handleDockDragLeave);
-                        iframe.addEventListener("drop", handleDockDrop);
-
-                        let iframeLoaded = false;
-
-                        // 监听 iframe 加载事件
-                        iframe.onload = () => {
-                            iframeLoaded = true;
-                            hasLoaded = true;
-                            if (loadTimeout) {
-                                clearTimeout(loadTimeout);
-                                loadTimeout = null;
-                            }
-                            if (retryInterval) {
-                                clearInterval(retryInterval);
-                                retryInterval = null;
-                            }
-                            isRetrying = false;
-                            // 跨域情况下，如果能触发 onload，通常表示加载成功
-                            showIframe();
-                        };
-
-                        // 监听 iframe 错误事件
-                        iframe.onerror = () => {
-                            hasLoaded = false;
-                            if (loadTimeout) {
-                                clearTimeout(loadTimeout);
-                                loadTimeout = null;
-                            }
-                            showError();
-                            startRetry();
-                        };
-
-                        dock.element.appendChild(iframe);
-
-                        // 设置超时检测（5秒后如果还没加载成功，切换到错误状态）
-                        loadTimeout = setTimeout(() => {
-                            if (!iframeLoaded && iframe) {
-                                showError();
-                                startRetry();
-                            }
-                        }, 5000);
-                    });
-                };
-                
-                const showWaiting = () => {
-                    if (iframe) iframe.style.display = "none";
-                    const urlEl = waitingContainer.querySelector(".ai-dock-url");
-                    if (urlEl) urlEl.textContent = plugin.config.openCodeUrl;
-                    waitingContainer.style.display = "flex";
-                    errorContainer.style.display = "none";
-                };
-
-                const showError = () => {
-                    if (iframe) iframe.style.display = "none";
-                    waitingContainer.style.display = "none";
-                    const urlEl = errorContainer.querySelector(".ai-dock-url");
-                    if (urlEl) urlEl.textContent = plugin.config.openCodeUrl;
-                    errorContainer.style.display = "flex";
-                };
-
-                const showIframe = () => {
-                    if (iframe) {
-                        iframe.style.display = "block";
-                        waitingContainer.style.display = "none";
-                        errorContainer.style.display = "none";
-                    }
-                };
-                
-                // 检测服务是否可用 - 使用图片加载方式避免 CORS 问题
-                const checkServiceAvailable = (): Promise<boolean> => {
-                    return new Promise((resolve) => {
-                        const img = new Image();
-                        const timeout = setTimeout(() => {
-                            img.src = '';
-                            resolve(false);
-                        }, 2000);
-
-                        img.onload = () => {
-                            clearTimeout(timeout);
-                            resolve(true);
-                        };
-
-                        img.onerror = () => {
-                            clearTimeout(timeout);
-                            // 图片加载错误可能是 CORS 或 404，但服务可能在运行
-                            // 我们尝试用 fetch 再确认一次
-                            fetch(plugin.config.openCodeUrl, {
-                                method: 'HEAD',
-                                mode: 'no-cors',
-                                cache: 'no-cache'
-                            }).then(() => {
-                                resolve(true);
-                            }).catch(() => {
-                                resolve(false);
-                            });
-                        };
-
-                        // 添加随机参数避免缓存
-                        img.src = `${plugin.config.openCodeUrl}/favicon.ico?_t=${Date.now()}`;
-                    });
-                };
-                
-                // 开始重连检测
-                const startRetry = () => {
-                    if (retryInterval || isRetrying) return;
-                    isRetrying = true;
-
-                    retryInterval = setInterval(() => {
-                        if (hasLoaded) {
-                            if (retryInterval) {
-                                clearInterval(retryInterval);
-                                retryInterval = null;
-                            }
-                            isRetrying = false;
-                            return;
-                        }
-
-                        checkServiceAvailable().then((available) => {
-                            if (available && !hasLoaded) {
-                                // 服务可用，重新创建 iframe
-                                if (retryInterval) {
-                                    clearInterval(retryInterval);
-                                    retryInterval = null;
-                                }
-                                isRetrying = false;
-                                hasLoaded = false;
-                                if (iframe) {
-                                    iframe.removeEventListener("dragenter", handleDockDragEnter);
-                                    iframe.removeEventListener("dragleave", handleDockDragLeave);
-                                    iframe.removeEventListener("drop", handleDockDrop);
-                                    iframe.remove();
-                                    iframe = null;
-                                }
-                                createIframe();
-                            }
-                        });
-                    }, 3000); // 每3秒检测一次
-                };
-                
-                // 重试按钮点击事件
-                retryButton.addEventListener("click", () => {
-                    if (retryInterval) {
-                        clearInterval(retryInterval);
-                        retryInterval = null;
-                    }
-                    isRetrying = false;
-                    hasLoaded = false;
-                    if (iframe) {
-                        iframe.removeEventListener("dragenter", handleDockDragEnter);
-                        iframe.removeEventListener("dragleave", handleDockDragLeave);
-                        iframe.removeEventListener("drop", handleDockDrop);
-                        iframe.remove();
-                        iframe = null;
-                    }
-                    createIframe();
-                });
-                
-                // 立即开始检测并创建 iframe
-                createIframe();
-                
-                // 优化 resize 性能：拖拽时禁用 iframe 交互以减少重绘
-                let resizeTimer: ReturnType<typeof setTimeout> | null = null;
-                let isResizing = false;
-                
-                const handleResizeStart = () => {
-                    if (!iframe?.style) return;
-                    if (!isResizing) {
-                        isResizing = true;
-                        iframe.style.pointerEvents = "none";
-                        iframe.style.willChange = "auto";
-                    }
-                };
-
-                const handleResizeEnd = () => {
-                    if (!iframe?.style) return;
-                    isResizing = false;
-                    if (resizeTimer) clearTimeout(resizeTimer);
-                    resizeTimer = setTimeout(() => {
-                        if (iframe?.style) {
-                            iframe.style.pointerEvents = "auto";
-                            iframe.style.willChange = "auto";
-                        }
-                    }, 150);
-                };
-
-                const handleResizeObserver = () => {
-                    handleResizeStart();
-                    if (resizeTimer) clearTimeout(resizeTimer);
-                    resizeTimer = setTimeout(handleResizeEnd, 100);
-                };
-
-                const resizeObserver = new ResizeObserver(handleResizeObserver);
-                
-                resizeObserver.observe(dock.element);
-
-                // 监听鼠标事件，检测拖拽边缘
-                let isDragging = false;
-                const handleMouseUp = () => {
-                    if (isDragging) {
-                        isDragging = false;
-                        handleResizeEnd();
-                    }
-                };
-                dock.element.addEventListener("mousedown", (e: MouseEvent) => {
-                    const rect = dock.element.getBoundingClientRect();
-                    const edgeThreshold = 5;
-                    const isNearEdge =
-                        e.clientX <= rect.left + edgeThreshold ||
-                        e.clientX >= rect.right - edgeThreshold ||
-                        e.clientY <= rect.top + edgeThreshold ||
-                        e.clientY >= rect.bottom - edgeThreshold;
-                    if (isNearEdge) {
-                        isDragging = true;
-                        handleResizeStart();
-                    }
-                });
-                document.addEventListener("mouseup", handleMouseUp);
-                document.addEventListener("dragstart", handleGlobalDragStart, true);
-                document.addEventListener("dragend", handleGlobalDragEnd, true);
-                dock.element.addEventListener("dragenter", handleDockDragEnter);
-                dock.element.addEventListener("dragleave", handleDockDragLeave);
-                dock.element.addEventListener("drop", handleDockDrop);
-
-                // 统一清理：定时器、重连、iframe、ResizeObserver、全局事件，供 destroy 与 onunload 调用
-                const cleanup = () => {
-                    if (loadTimeout) {
-                        clearTimeout(loadTimeout);
-                        loadTimeout = null;
-                    }
-                    if (retryInterval) {
-                        clearInterval(retryInterval);
-                        retryInterval = null;
-                    }
-                    if (resizeTimer) {
-                        clearTimeout(resizeTimer);
-                        resizeTimer = null;
-                    }
-                    resizeObserver.disconnect();
-                    document.removeEventListener("mouseup", handleMouseUp);
-                    document.removeEventListener("dragstart", handleGlobalDragStart, true);
-                    document.removeEventListener("dragend", handleGlobalDragEnd, true);
-                    dock.element.removeEventListener("dragenter", handleDockDragEnter);
-                    dock.element.removeEventListener("dragleave", handleDockDragLeave);
-                    dock.element.removeEventListener("drop", handleDockDrop);
-                    hideDropHint();
-                    activeDragBlockId = null;
-                    if (iframe) {
-                        iframe.removeEventListener("dragenter", handleDockDragEnter);
-                        iframe.removeEventListener("dragleave", handleDockDragLeave);
-                        iframe.removeEventListener("drop", handleDockDrop);
-                        iframe.src = "about:blank";
-                        iframe.remove();
-                        iframe = null;
-                    }
-                };
-                (dock.element as any).__aiBridgeCleanup = cleanup;
-                plugin.dockCleanup = cleanup;
-            },
-            destroy() {
-                const cleanup = (this as any)?.element?.__aiBridgeCleanup;
-                if (cleanup && typeof cleanup === "function") {
-                    cleanup();
-                }
-                console.log("[AI Agent Bridge] dock destroyed");
-            },
-        });
-    }
-
-    openSetting(): void {
-        // 创建对话框
-        const dialog = new Dialog({
-            title: this.i18n.settings ?? "Settings",
-            content: `<div id="ai-bridge-setting-panel" class="fn__flex-column" style="gap:12px;padding:16px;"></div>`,
-            width: "480px",
-        });
-
-        const panel = dialog.element.querySelector("#ai-bridge-setting-panel")!;
-
-        const addRow = (title: string, desc: string | undefined, el: HTMLElement) => {
-            const row = document.createElement("div");
-            row.className = "b3-form__item";
-            row.innerHTML = `<div class="b3-form__label">${title}</div>`;
-            if (desc) {
-                const descEl = document.createElement("div");
-                descEl.className = "b3-form__desc";
-                descEl.textContent = desc;
-                row.appendChild(descEl);
-            }
-            const action = document.createElement("div");
-            action.className = "b3-form__action";
-            action.appendChild(el);
-            row.appendChild(action);
-            panel.appendChild(row);
-        };
-
-        const openCodeUrl = document.createElement("input");
-        openCodeUrl.type = "text";
-        openCodeUrl.className = "b3-text-field fn__block";
-        openCodeUrl.value = this.config.openCodeUrl;
-        openCodeUrl.placeholder = "https://example.com";
-        openCodeUrl.addEventListener("change", async () => {
-            this.config.openCodeUrl = openCodeUrl.value;
-            await this.saveConfig();
-            showMessage(this.i18n.restartRequired ?? "Please restart plugin to apply changes");
-        });
-        addRow(this.i18n.openCodeUrl ?? "AI Agent Web URL", this.i18n.openCodeUrlDesc, openCodeUrl);
-    }
+  }
+  onunload() {
+    this.disposed = true;
+    this.unsubscribe?.(); this.unsubscribe = null;
+    this.eventBus.off('switch-protyle', this.trackEditor);
+    this.eventBus.off('loaded-protyle-dynamic', this.trackEditor);
+    this.eventBus.off('loaded-protyle-static', this.trackEditor);
+    document.removeEventListener('selectionchange', this.trackSelection);
+    document.removeEventListener('dragstart', this.trackNotebookDrag);
+    for (const element of this.panels.keys()) this.clearPanel(element);
+    this.panels.clear(); this.components.clear();
+    void this.controller?.destroy().catch(error => console.error('[DeepSeek Harness] shutdown:', error));
+  }
 }

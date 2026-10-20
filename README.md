@@ -1,103 +1,48 @@
-# AI CLI Bridge for SiYuan
+# SiYuan DeepSeek Harness
 
-[English](https://github.com/yangtaihong59/siyuan-plugins-ai-cli-bridge/blob/main/README.md) | [中文](https://github.com/yangtaihong59/siyuan-plugins-ai-cli-bridge/blob/main/README_zh_CN.md)
+Chat with a locally installed DeepSeek Harness inside SiYuan. Stream replies, reasoning and tool activity, and drag notebooks, documents or blocks into the conversation.
 
-> Recommended pairing: use this plugin together with [SiYuan MCP Sisyphus](https://github.com/yangtaihong59/siyuan-plugins-mcp-sisyphus) if you want the embedded AI tool to operate SiYuan notes through MCP.
+This is an upgrade of **AI CLI Bridge**. The repository and plugin ID remain `siyuan-plugins-ai-cli-bridge`; the original Web panel, saved URL and block-ID drag-and-drop are preserved.
 
-Load any AI Agent web page or other web tool into the SiYuan sidebar. This plugin only embeds the page you configure; OpenCode is optional, and MCP is only needed if you want the embedded tool to operate your notes.
+![Preview](preview.png)
 
-## Features
+## Use
 
-- **Sidebar integration**: Add a dockable AI Agent panel in SiYuan
-- **Custom URL**: Configure any web page URL (OpenCode, local LLM UI, ChatGPT, etc.)
-- **Flexible layout**: Place the panel on the left, right, or bottom and resize it
-- **Block ID drag bridge**: Drag a SiYuan block onto a text input inside the embedded page and pass the block ID as plain text when the page accepts native drops
-- **Shortcuts**: Open the panel with `⌥⌘A` (Mac) or `Alt+Ctrl+A` (Windows/Linux)
+Install or update from the SiYuan marketplace. Install DeepSeek Harness independently and complete its account/API configuration first. The plugin discovers the local runtime and reuses existing credentials. Harness requires a desktop frontend; browser and mobile frontends retain the Web panel.
 
-## Installation
+New installations start in Harness. Existing Web configurations retain their mode and URL. Use **Harness** above the Web panel to return to chat. Plugin settings offer a default-panel selector and Web URL. Harness settings also include **网页面板 / Open Web panel**.
 
-1. Download the latest release from GitHub.
-2. Extract it into SiYuan’s `data/plugins` folder.
-3. Enable “AI CLI Bridge” under Settings → Plugins.
-4. Open the plugin settings and enter the web page URL you want to embed.
-5. If that page depends on a local or remote service, start that service separately.
-6. If you want the embedded AI tool to operate SiYuan through MCP, install an MCP plugin or service as an optional companion (for example [syplugin-anMCPServer](https://github.com/OpaqueGlass/syplugin-anMCPServer "GitHub Repo")).
+- Select models and reasoning effort from the live Harness catalogue.
+- Stream text, reasoning and tools; stop and continue the same session.
+- Compact, Balanced and Full display levels; Balanced folds activity after the entire turn finishes.
+- Drop notebooks/documents/blocks anywhere in the sidebar. Only the composer highlights; at most six references are accepted.
+- Document/block references carry bounded snapshots and use native SiYuan hover previews. Valid SiYuan links in replies also preview and navigate.
+- Notebook attachments define a retrieval scope rather than loading every document; connected note tools retrieve content as needed.
+- Saved conversations, safe Markdown and locally scrolling tables.
 
-## Usage
+[SiYuan Sisyphus](https://github.com/yangtaihong59/siyuan-plugins-mcp-sisyphus) is the recommended note MCP server. The agent briefly suggests installing and connecting it when note tools are needed but unavailable. The plugin does not change global Harness profiles or auto-enable MCP for new users.
 
-### Basic operations
+## Web panel and data
 
-- **Open panel**: Click the AI icon in the sidebar or press `⌥⌘A`.
-- **Close panel**: Click the AI icon again or use the panel’s close button.
-- **Resize**: Drag the panel edge to change width or height.
-- **Drop block IDs**: Drag a SiYuan block onto a text input in the embedded page. If that page supports native text drops, it receives the block ID.
+Set a complete HTTP/HTTPS URL in settings. The original iframe, waiting/error views, automatic retry, resizing behavior and block-ID text drag support remain. Website framing policy and authentication still apply.
 
-### Drag-and-drop limits
+Web configuration retains `ai-agent-bridge-config`. Harness state uses this plugin's separate `harness-state.json`. Data from the standalone trial plugin stays in its original namespace and is not deleted or automatically merged. Leaving Harness closes its owned idle runtime; stop generation before switching panels.
 
-- This feature only enriches native drag data; it does not control iframe DOM across origins.
-- The target page must support text drops on its own input field.
-- Compatibility with third-party web apps is not guaranteed.
-
-### Configuration
-
-Under Settings → Plugins → AI CLI Bridge:
-
-| Option | Description              | Default                |
-| ------ | ------------------------ | ---------------------- |
-| URL    | URL of the embedded page | http://localhost:4096  |
-
-### Suggested setups
-
-The plugin does not provide an AI service or a built-in web UI. It only loads the URL you configure.
-
-**Example: Local Openclaw**
-
-```
-Use the address provided by openclaw dashboard
-```
-
-**Example: Local OpenCode**
-
-```
-OpenCode URL: http://localhost:4096
-```
-
-**Example: Local Ollama Web UI**
-
-```
-OpenCode URL: http://localhost:3000
-```
-
-**Example: ChatGPT in browser** (if available)
-
-```
-OpenCode URL: https://chat.openai.com
-```
+Conversations and references may sync with the workspace. Submitted content goes to the model service configured in Harness, whose profile controls file, shell and network access. MCP tokens are excluded from saved state and patches. Replies never execute HTML. Complete approvals, queued steering, file/PDF uploads and @ search are not implemented.
 
 ## Development
 
-```bash
-# Install dependencies
+```sh
 pnpm install
-
-pnpm run make-link
-
-# Development mode (hot reload)
 pnpm dev
+pnpm make-link
+pnpm check
+pnpm test
+pnpm build
 ```
 
-## License
+`make-link` lets you select the workspace, or use `pnpm make-link --workspace /absolute/workspace`. It links `dev/` without overwriting an existing installation. Stop the plugin and back up an old directory before replacing it. `dist/` and `package.zip` retain the original plugin ID.
 
-MIT License
+`pnpm preview:ui` uses shared components and demo data without a model or notes. The build checks the CJS entry, the Web branch without Node, switching guards and unload behavior. See [中文说明](README_zh_CN.md) and [ACCEPTANCE.md](ACCEPTANCE.md).
 
-## Version History
-
-- **v0.1.9** (2026-04-08) - Added drag-and-drop support: drop a SiYuan block onto a text input in the embedded page to insert the block ID
-- **v0.1.8** (2026-04-08) - Fixed iframe null check in ResizeObserver, optimized resource cleanup on unload, updated documentation links
-- **v0.1.7** (2025-04-07) - Synchronized README documentation
-- **v0.1.6** (2025-04-07) - Removed MCP features, keeping core sidebar embedding only
-
-## Support
-
-- Issues: [GitHub Issues](https://github.com/yangtaihong59/siyuan-plugins-ai-cli-bridge/issues)
-- Community: [SiYuan Community](https://ld246.com/tag/siyuan)
+MIT License.

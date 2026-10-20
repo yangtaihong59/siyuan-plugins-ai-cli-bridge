@@ -1,0 +1,3 @@
+/** Original notebook and whale-tail mark; store SVG source is icon.svg. */
+export const ICON_ID = 'iconSiYuanDeepSeekHarness';
+export const ICON_SYMBOL = `<symbol id="${ICON_ID}" viewBox="0 0 24 24"><path fill="currentColor" fill-rule="evenodd" d="M6 2h12a3 3 0 0 1 3 3v14a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3V5a3 3 0 0 1 3-3Zm0 2a1 1 0 0 0-1 1v14a1 1 0 0 0 1 1h1V4H6Zm3 0v16h9a1 1 0 0 0 1-1V5a1 1 0 0 0-1-1H9Z"/><path fill="currentColor" d="M14 15c-.5-2-1.4-2.8-2.7-3.9C10 10 9.6 8.8 9.5 7.5c1.9 0 3.4.8 4.5 2.4 1.1-1.6 2.6-2.4 4.5-2.4-.1 1.3-.5 2.5-1.8 3.6-1.3 1.1-2.2 1.9-2.7 3.9ZM11.5 17h5v1.5h-5Z"/></symbol>`;

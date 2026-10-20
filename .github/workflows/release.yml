@@ -27,7 +27,7 @@ jobs:
         uses: pnpm/action-setup@v4
         id: pnpm-install
         with:
-          version: 8
+          version: 10.29.3
           run_install: false
 
       # Get pnpm store directory
@@ -48,7 +48,12 @@ jobs:
 
       # Install dependencies
       - name: Install dependencies
-        run: pnpm install
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck and tests
+        run: |
+          pnpm check
+          pnpm test
 
       # Build for production, 这一步会生成一个 package.zip
       - name: Build for production

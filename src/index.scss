@@ -1,0 +1,8 @@
+.dsh-dock { height: 100%; min-width: 0; overflow: hidden; }
+
+.dsh-web-shell { display:flex; flex-direction:column; width:100%; height:100%; overflow:hidden; color:var(--b3-theme-on-background); background:var(--b3-theme-background); }
+.dsh-web-bar { display:flex; align-items:center; gap:8px; flex:0 0 36px; padding:0 12px; border-bottom:1px solid var(--b3-border-color); font-size:12px; }
+.dsh-web-bar > span { flex:1; color:var(--b3-theme-on-surface); }
+.dsh-web-bar button { border:0; border-radius:5px; padding:3px 6px; background:transparent; color:var(--b3-theme-on-surface); font:inherit; cursor:pointer; }
+.dsh-web-bar button:hover { background:var(--b3-theme-surface); color:var(--b3-theme-on-background); }
+.dsh-web-content { position:relative; flex:1; min-height:0; overflow:hidden; }

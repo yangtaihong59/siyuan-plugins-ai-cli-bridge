@@ -2,18 +2,22 @@
   "name": "siyuan-plugins-ai-cli-bridge",
   "author": "Taihong Yang",
   "url": "https://github.com/yangtaihong59/siyuan-plugins-ai-cli-bridge",
-  "version": "0.1.9",
-  "minAppVersion": "2.9.0",
-  "backends": ["all"],
-  "frontends": ["all"],
+  "version": "0.2.0",
+  "minAppVersion": "3.1.0",
+  "backends": [
+    "all"
+  ],
+  "frontends": [
+    "all"
+  ],
   "disabledInPublish": true,
   "displayName": {
-    "default": "AI CLI Bridge",
-    "zh_CN": "AI Cli Bridge"
+    "default": "SiYuan DeepSeek Harness",
+    "zh_CN": "SiYuan DeepSeek Harness"
   },
   "description": {
-    "default": "Embed any AI Agent web page or other web tool into SiYuan as a sidebar panel. Drag blocks from SiYuan to pass IDs into web inputs. MCP pairing is optional.",
-    "zh_CN": "将任意 AI Agent 网页嵌入思源侧边栏；支持拖拽思源块到网页输入框传递块 ID；搭配 MCP 可按需选择。"
+    "default": "Chat with a local DeepSeek Harness agent in SiYuan, with streaming, note references and an optional Web panel.",
+    "zh_CN": "在思源侧栏使用本机 DeepSeek Harness：流式对话、模型选择与笔记引用，保留原有 Web 网页面板。"
   },
   "readme": {
     "default": "README.md",
@@ -21,10 +25,13 @@
   },
   "keywords": [
     "AI",
+    "DeepSeek",
+    "Harness",
     "Agent",
-    "CLI",
-    "sidebar",
-    "dock",
-    "integration"
-  ]
+    "MCP",
+    "Web",
+    "sidebar"
+  ],
+  "icon": "icon.png",
+  "preview": "preview.png"
 }
