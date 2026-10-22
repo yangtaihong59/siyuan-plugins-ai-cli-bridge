@@ -112,7 +112,7 @@ describe('ChatController dropped references and preview', () => {
         const snapshot: NoteReference = { id: ids[0], title: '算法段落', text: '这段正文已经通过思源 API 读取，不依赖 MCP。', kind: 'block', truncated: true };
         vi.mocked(host.getReference!).mockResolvedValue(snapshot);
         await controller.addDroppedReferences({ [gutter(ids[0])]: '' });
-        expect(buildPrompt('解释这个段落', controller.activeChat)).toContain(snapshot.text);
+        expect(buildPrompt('解释这个段落', controller.activeChat.references)).toContain(snapshot.text);
         await controller.send('解释这个段落');
         const client = runtime.clients.at(-1)!;
         expect(client.prompt).toHaveBeenCalledTimes(1);
@@ -120,7 +120,7 @@ describe('ChatController dropped references and preview', () => {
         expect(text).toContain(`<note-reference id="${ids[0]}" title="算法段落">`);
         expect(text).toContain(snapshot.text);
         expect(host.getReference).toHaveBeenCalledTimes(1);
-        expect(await controller.previewReference(ids[0])).toEqual(snapshot);
+        expect(await controller.previewReference(ids[0], controller.activeChat.messages[0].id)).toEqual(snapshot);
         expect(host.getReference).toHaveBeenCalledTimes(1);
     });
 
@@ -337,7 +337,7 @@ describe('ChatController notebook scopes', () => {
     it('keeps notebook scope metadata separate from body snapshots in the model prompt', async () => {
         controller.activeChat.references.push(notebookReference(ids[0]), reference(ids[0]));
         expect(controller.state.settings.mcpEnabled).toBe(false);
-        const prompt = buildPrompt('请按需检索这个范围', controller.activeChat);
+        const prompt = buildPrompt('请按需检索这个范围', controller.activeChat.references);
         expect(prompt).toContain(`<notebook-reference id="${ids[0]}"`);
         expect(prompt).toContain(`<note-reference id="${ids[0]}"`);
         expect(prompt).toContain('尚未读取整本正文');
@@ -348,5 +348,150 @@ describe('ChatController notebook scopes', () => {
         expect(prompt).toContain(`正文快照 ${ids[0]}`);
         expect(prompt.match(/<notebook-reference /g)).toHaveLength(1);
         expect(prompt.match(/<note-reference /g)).toHaveLength(1);
+    });
+});
+
+describe('message attachment snapshots', () => {
+    it('preserves a selection source block in its sent snapshot and persisted history', async () => {
+        const selection: NoteReference = { id: 'selection-source', sourceId: ids[0], title: '选区来源', kind: 'selection', text: '发送时选区' };
+        vi.mocked(host.getSelection).mockResolvedValueOnce(selection);
+        await controller.addSelection();
+        await controller.send('解释这段选区');
+        const message = controller.activeChat.messages[0];
+        expect(message.references).toEqual([selection]);
+        expect(await controller.previewReference(selection.id, message.id)).toEqual(selection);
+        const saved = vi.mocked(host.saveData).mock.calls.at(-1)![1] as any;
+        expect(saved.chats[0].messages[0].references[0].sourceId).toBe(ids[0]);
+        vi.mocked(host.loadData).mockResolvedValueOnce(saved);
+        await controller.initialize();
+        expect(controller.activeChat.messages[0].references?.[0].sourceId).toBe(ids[0]);
+    });
+
+    it('persists the first message attachments before dispatch, clears the draft and does not repeat them in the next prompt', async () => {
+        await controller.addDroppedReferences(documents(ids[0]));
+        const draft = controller.activeChat.references[0];
+        await controller.connect();
+        const client = runtime.clients.at(-1)!;
+        client.prompt.mockImplementationOnce(async () => {
+            const saved = vi.mocked(host.saveData).mock.calls.at(-1)![1] as any;
+            expect(saved.chats[0].references).toEqual([]);
+            expect(saved.chats[0].messages[0].references).toEqual([draft]);
+            return { messageId: 'first' };
+        });
+        expect(await controller.send('第一轮使用附件')).toBe(true);
+        const first = controller.activeChat.messages[0];
+        expect(first.references).toEqual([draft]);
+        expect(first.references![0]).not.toBe(draft);
+        expect(controller.activeChat.references).toEqual([]);
+        draft.text = '发送后改变原对象';
+        expect(first.references![0].text).toBe(`正文快照 ${ids[0]}`);
+        expect(await controller.send('第二轮继续讨论')).toBe(true);
+        expect(client.prompt.mock.calls[0][1][0].text).toContain(`正文快照 ${ids[0]}`);
+        expect(client.prompt.mock.calls[1][1][0].text).toBe('第二轮继续讨论');
+        expect(controller.activeChat.messages[1]).not.toHaveProperty('references');
+        const saved = structuredClone(vi.mocked(host.saveData).mock.calls.at(-1)![1]) as any;
+        vi.mocked(host.loadData).mockResolvedValueOnce(saved);
+        await controller.initialize();
+        expect(controller.activeChat.references).toEqual([]);
+        expect(await controller.previewReference(ids[0], first.id)).toEqual(reference(ids[0]));
+        expect(host.getReference).toHaveBeenCalledTimes(1);
+    });
+
+    it('keeps a later same-ID snapshot independent from the earlier message and its historical preview', async () => {
+        await controller.addDroppedReferences(documents(ids[0]));
+        await controller.send('旧快照');
+        const first = controller.activeChat.messages[0];
+        const updated = { ...reference(ids[0]), title: '更新后的标题', text: '新的正文内容' };
+        vi.mocked(host.getReference!).mockResolvedValue(updated);
+        await controller.addDroppedReferences(documents(ids[0]));
+        expect(await controller.previewReference(ids[0])).toEqual(updated);
+        const oldPreview = await controller.previewReference(ids[0], first.id);
+        expect(oldPreview).toEqual(reference(ids[0]));
+        oldPreview.text = '预览返回值被修改';
+        await controller.send('新快照');
+        const second = controller.activeChat.messages[1];
+        expect(await controller.previewReference(ids[0], first.id)).toEqual(reference(ids[0]));
+        expect(await controller.previewReference(ids[0], second.id)).toEqual(updated);
+        expect(host.getReference).toHaveBeenCalledTimes(2);
+    });
+
+    it('addresses sent same-ID notebook and document attachments separately without falling back to the draft', async () => {
+        await controller.addDroppedReferences({ ...notebooks(ids[0]), ...documents(ids[0]) });
+        await controller.send('使用两种引用');
+        const message = controller.activeChat.messages[0];
+        expect(message.references?.map(referenceKey)).toEqual([`notebook:${ids[0]}`, ids[0]]);
+        controller.activeChat.references.push(reference(ids[1]));
+        expect(await controller.previewReference(`notebook:${ids[0]}`, message.id)).toEqual(notebookReference(ids[0]));
+        expect(await controller.previewReference(ids[0], message.id)).toEqual(reference(ids[0]));
+        await expect(controller.previewReference(ids[1], message.id)).rejects.toThrow('这条消息没有');
+        await expect(controller.previewReference(ids[1], 'missing-message')).rejects.toThrow('找不到这条用户消息');
+        expect(host.getNotebookReference).toHaveBeenCalledTimes(1);
+        expect(host.getReference).toHaveBeenCalledTimes(1);
+    });
+
+    it('preserves legacy conversation references as draft attachments without assigning them to old messages', async () => {
+        await controller.addDroppedReferences(documents(ids[0]));
+        const saved = structuredClone(vi.mocked(host.saveData).mock.calls.at(-1)![1]) as any;
+        saved.chats[0].messages = [{ id: 'legacy-user', role: 'user', text: '历史消息', time: 0 }];
+        vi.mocked(host.loadData).mockResolvedValueOnce(saved);
+        await controller.initialize();
+        expect(controller.activeChat.references).toEqual([reference(ids[0])]);
+        expect(controller.activeChat.messages[0]).not.toHaveProperty('references');
+        await expect(controller.previewReference(ids[0], 'legacy-user')).rejects.toThrow('这条消息没有');
+        await controller.send('本次才使用这些附件');
+        expect(controller.activeChat.references).toEqual([]);
+        expect(controller.activeChat.messages[1].references).toEqual([reference(ids[0])]);
+    });
+
+    it('never rereads a missing historical body as if it had been captured when the message was sent', async () => {
+        const historical = { id: 'sent-user', role: 'user' as const, text: '旧引用', time: 0,
+            references: [{ id: ids[0], title: '发送时没有正文的引用' }] };
+        controller.activeChat.messages.push(historical);
+        expect(await controller.previewReference(ids[0], historical.id)).toEqual({ ...historical.references[0], text: '' });
+        expect(host.getReference).not.toHaveBeenCalled();
+        expect(host.getNotebookReference).not.toHaveBeenCalled();
+    });
+
+    it('copies only reference metadata into message snapshots and keeps runtime credentials out of saved data', async () => {
+        const secret = 'fixture-runtime-token';
+        controller.state.settings.mcpToken = secret;
+        controller.activeChat.references.push({ ...reference(ids[0]), runtimeToken: secret } as NoteReference);
+        await controller.send('仅发送正文快照');
+        expect(controller.activeChat.messages[0].references![0]).not.toHaveProperty('runtimeToken');
+        for (const [, saved] of vi.mocked(host.saveData).mock.calls) expect(JSON.stringify(saved)).not.toContain(secret);
+    });
+
+    it.each(['note', 'selection'] as const)('rejects a late %s read after sending starts instead of overwriting the next draft', async kind => {
+        const read = deferred<NoteReference>();
+        if (kind === 'note') vi.mocked(host.getCurrentNote).mockReturnValueOnce(read.promise);
+        else vi.mocked(host.getSelection).mockReturnValueOnce(read.promise);
+        const adding = kind === 'note' ? controller.addCurrentNote() : controller.addSelection();
+        const rejected = expect(adding).rejects.toThrow('请等本轮结束');
+        await controller.connect();
+        const client = runtime.clients.at(-1)!;
+        const entered = deferred<void>(), completed = deferred<Record<string, never>>();
+        client.request.mockImplementationOnce(async () => { entered.resolve(); return completed.promise; });
+        const sending = controller.send('先发送本轮');
+        try {
+            await entered.promise;
+            read.resolve(reference(ids[0]));
+            await rejected;
+            expect(controller.activeChat.references).toEqual([]);
+            expect(controller.activeChat.messages[0]).not.toHaveProperty('references');
+        } finally { completed.resolve({}); await sending; }
+    });
+
+    it.each(['note', 'selection'] as const)('rejects a late %s read after switching conversations', async kind => {
+        const read = deferred<NoteReference>();
+        if (kind === 'note') vi.mocked(host.getCurrentNote).mockReturnValueOnce(read.promise);
+        else vi.mocked(host.getSelection).mockReturnValueOnce(read.promise);
+        const original = controller.activeChat;
+        const adding = kind === 'note' ? controller.addCurrentNote() : controller.addSelection();
+        const rejected = expect(adding).rejects.toThrow('对话已切换');
+        await controller.newChat();
+        read.resolve(reference(ids[0]));
+        await rejected;
+        expect(original.references).toEqual([]);
+        expect(controller.activeChat.references).toEqual([]);
     });
 });

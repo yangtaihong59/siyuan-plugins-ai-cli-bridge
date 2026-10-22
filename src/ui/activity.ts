@@ -7,6 +7,7 @@ export interface AssistantActivity {
   unsettled: boolean;
   hasIssue: boolean;
   hasProcess: boolean;
+  progressIds: Set<string>;
   toolCount: number;
   summary: string;
 }
@@ -18,7 +19,7 @@ export function groupAssistantActivity(messages: Message[], busy: boolean): Map<
   for (const message of messages) {
     if (message.role !== 'assistant') { group = undefined; continue; }
     if (!group) {
-      group = { id: message.id, messages: [], active: false, unsettled: false, hasIssue: false, hasProcess: false, toolCount: 0, summary: '' };
+      group = { id: message.id, messages: [], active: false, unsettled: false, hasIssue: false, hasProcess: false, progressIds: new Set(), toolCount: 0, summary: '' };
       groups.push(group);
     }
     group.messages.push(message);
@@ -33,9 +34,18 @@ export function groupAssistantActivity(messages: Message[], busy: boolean): Map<
     const pending = [...list].reverse().find(tool => tool.status === 'running');
     const errors = list.filter(tool => tool.status === 'error').length;
     item.active = busy && item.messages.at(-1) === messages.at(-1);
+    for (const message of item.messages) {
+      // Earlier legacy steps are known progress; an unmarked last reply has no
+      // durable completion evidence, so keep its original presentation.
+      if (message.phase === 'progress' || message.phase !== 'final' && (item.active
+        || message !== item.messages.at(-1) || message.tools?.length || message.streaming || message.interrupted)) {
+        item.progressIds.add(message.id);
+      }
+    }
     item.unsettled = !item.active && !stopped && Boolean(pending || item.messages.some(message => message.streaming));
     item.hasIssue = stopped || errors > 0 || item.unsettled;
-    item.hasProcess = list.length > 0 || item.messages.some(message => message.reasoning || message.streaming || message.interrupted);
+    item.hasProcess = list.length > 0 || item.messages.some(message => message.reasoning || message.streaming || message.interrupted
+      || message.text && item.progressIds.has(message.id));
     item.toolCount = list.length;
     item.summary = item.active
       ? pending ? `执行中 · ${pending.name}` : thinking ? '思考中' : errors ? '继续处理中 · 有工具未完成' : '生成中'

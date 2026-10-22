@@ -15,8 +15,11 @@ New installations start in Harness. Existing Web configurations retain their mod
 - Select models and reasoning effort from the live Harness catalogue.
 - Stream text, reasoning and tools; stop and continue the same session.
 - Compact, Balanced and Full display levels; Balanced folds activity after the entire turn finishes.
+- Interim updates appear in the activity, with reasoning and tool calls between updates folded separately. The last answer is marked final only after a successful turn-end event and completion of the whole task, including subagents. Stopped or failed output stays in the activity.
 - Drop notebooks/documents/blocks anywhere in the sidebar. Only the composer highlights; at most six references are accepted.
+- References belong to the message that sends them. After sending, their snapshots appear below that message and the composer clears; later prompts use the same session without attaching those snapshots again. Failures before dispatch retain the draft. An unknown result after dispatch never restores or automatically resends it.
 - Document/block references carry bounded snapshots and use native SiYuan hover previews. Valid SiYuan links in replies also preview and navigate.
+- Click document/block attachment labels to open their source. New selections retain their source block; older selections without a source and notebook scopes remain previews.
 - Notebook attachments define a retrieval scope rather than loading every document; connected note tools retrieve content as needed.
 - Saved conversations, safe Markdown and locally scrolling tables.
 

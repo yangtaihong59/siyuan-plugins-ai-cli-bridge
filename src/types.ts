@@ -19,10 +19,12 @@ export interface ModelChoice {
   provider: string; id: string; name: string; providerName: string;
   reasoning?: string[]; defaultReasoning?: string;
 }
-export interface NoteReference { id: string; title: string; text?: string; kind?: 'document' | 'block' | 'selection' | 'notebook'; truncated?: boolean }
+export interface NoteReference { id: string; title: string; text?: string; kind?: 'document' | 'block' | 'selection' | 'notebook'; truncated?: boolean; sourceId?: string }
 export interface ToolActivity { id: string; name: string; status: 'running' | 'completed' | 'error'; text?: string }
 export interface Message {
   id: string; role: 'user' | 'assistant' | 'system'; text: string; time: number;
+  phase?: 'progress' | 'final';
+  references?: NoteReference[];
   reasoning?: string; streaming?: boolean; interrupted?: boolean; tools?: ToolActivity[];
   seq?: number; turn?: number; step?: number;
 }

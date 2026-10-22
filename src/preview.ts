@@ -73,7 +73,7 @@ const state: State = {
 };
 const demoReferences: Record<string, NoteReference> = {
   [`notebook:${demoNotebookId}`]: { id: demoNotebookId, title: '演示研究库', kind: 'notebook', text: `笔记本：演示研究库\n\n引用范围：此笔记本。\n笔记本 ID：${demoNotebookId}\n\n文档正文按任务需要单独读取。这里只展示笔记本范围说明。\n\n演示数据，未读取真实思源笔记。` },
-  'demo-note': { id: 'demo-note', title: '研究想法', kind: 'document', text: '# 研究想法\n\n先建立可复现的基线，再验证每个改进带来的收益。\n\n- 核心假设：误差主要来自模型偏差。\n- 对照实验：固定数据划分、参数与随机种子。\n- 评价指标：误差分布与重复实验的方差。\n\n这是演示内容，未读取真实笔记。' },
+  'demo-note': { id: '20261020000000-demo004', title: '研究想法', kind: 'document', text: '# 研究想法\n\n先建立可复现的基线，再验证每个改进带来的收益。\n\n- 核心假设：误差主要来自模型偏差。\n- 对照实验：固定数据划分、参数与随机种子。\n- 评价指标：误差分布与重复实验的方差。\n\n这是演示内容，未读取真实笔记。' },
   '20261020000000-demo001': { id: '20261020000000-demo001', title: '实验设计 · 演示文档', kind: 'document', text: '# 实验设计\n\n比较基线与改进算法，在同一数据划分下记录误差和方差。\n\n这是模拟拖入的文档附件，未访问真实笔记。' },
   '20261020000000-demo002': { id: '20261020000000-demo002', title: '评价指标 · 演示块', kind: 'block', text: '评价指标应能够重复计算，包含平均误差、分位数和跨实验方差。\n\n这是模拟拖入的正文块，未访问真实笔记。' },
 };
@@ -88,18 +88,21 @@ const update = () => { app?.$set({ state: { ...state, chats: [...state.chats] } 
 const stopTimer = () => { if (timer) clearInterval(timer); timer = undefined; };
 
 function conversation(scene: Scene, id = 'preview'): Conversation {
+  const references = params.get('notebook') === '1'
+    ? [{ ...demoReferences[demoNotebookId] }, { ...demoReferences[`notebook:${demoNotebookId}`] }]
+    : [{ ...demoReferences['demo-note'] }];
   const messages: Message[] = scene === 'welcome' ? [] : [
-    { id: `${id}-u`, role: 'user', text: '帮我整理三个可以验证的研究问题。', time: Date.now() },
-    { id: `${id}-a1`, role: 'assistant', reasoning, text: '', time: Date.now(),
+    { id: `${id}-u`, role: 'user', text: '帮我整理三个可以验证的研究问题。', references, time: Date.now() },
+    { id: `${id}-a1`, role: 'assistant', phase: 'progress', reasoning, text: '先读取笔记，核对已有假设与证据。', time: Date.now(),
       tools: [{ id: `${id}-t1`, name: '思源 · 读取笔记', status: 'completed', text: '演示工具结果\n\n已读取《研究想法》：核心假设、对照实验与评价指标。\n此预览未调用真实笔记工具。' }] },
-    { id: `${id}-a2`, role: 'assistant', text: '', time: Date.now(),
+    { id: `${id}-a2`, role: 'assistant', phase: 'progress', text: '已完成初步检查，正在检索相关内容作对照。', time: Date.now(),
       tools: [{ id: `${id}-t2`, name: '思源 · 搜索相关笔记', status: scene === 'tools' ? 'running' : 'completed', text: scene === 'tools' ? '演示：等待工具返回，assistant 文本流已经结束。' : '演示工具结果：找到 3 条相关笔记。\n此预览未调用真实笔记工具。' }] },
-    { id: `${id}-a`, role: 'assistant', text: scene === 'streaming' ? response.slice(0, 95) : response,
+    { id: `${id}-a`, role: 'assistant', phase: scene === 'streaming' ? 'progress' : 'final', text: scene === 'streaming' ? response.slice(0, 95) : response,
       streaming: scene === 'streaming', time: Date.now() },
   ];
   if (scene === 'tools') messages.pop();
   return { id, title: scene === 'welcome' ? '新对话' : '整理研究问题', sessionId: id, updatedAt: Date.now(),
-    references: scene === 'welcome' ? [] : params.get('notebook') === '1' ? [{ ...demoReferences[demoNotebookId] }, { ...demoReferences[`notebook:${demoNotebookId}`] }] : [{ ...demoReferences['demo-note'] }], messages };
+    references: [], messages };
 }
 
 function setScene(scene: Scene) {
@@ -107,7 +110,7 @@ function setScene(scene: Scene) {
   const chat = conversation(scene);
   state.chats = [chat]; state.activeChatId = chat.id;
   state.busy = scene === 'streaming' || scene === 'tools'; state.connected = true;
-  state.error = ''; state.status = scene === 'streaming' ? '演示流式内容' : '';
+  state.error = ''; state.status = scene === 'streaming' ? '演示流式内容' : scene === 'tools' ? '演示工具执行中' : '';
   sceneControl.value = scene;
   update();
 }
@@ -128,8 +131,11 @@ async function play(text?: string) {
   if (!text) { state.chats = [chat]; state.activeChatId = chat.id; }
   const id = `demo-${++sequence}`;
   chat.title = '整理研究问题';
-  chat.messages.push({ id: `${id}-u`, role: 'user', text: text || '帮我整理三个可以验证的研究问题。', time: Date.now() });
-  const assistant: Message = { id: `${id}-a`, role: 'assistant', text: '', reasoning: '', streaming: true, time: Date.now() };
+  const references = chat.references.map(ref => ({ ...ref }));
+  chat.messages.push({ id: `${id}-u`, role: 'user', text: text || '帮我整理三个可以验证的研究问题。', references, time: Date.now() });
+  chat.references = [];
+  const assistant: Message = { id: `${id}-a`, role: 'assistant', phase: 'progress', text: '', reasoning: '', streaming: true, time: Date.now() };
+  let answer: Message | undefined;
   chat.messages.push(assistant);
   state.busy = true; state.connected = true; state.error = ''; state.status = '演示流式内容';
   sceneControl.value = 'streaming'; syncURL(); update();
@@ -139,11 +145,19 @@ async function play(text?: string) {
     if (cursor <= reasoning.length) assistant.reasoning = reasoning.slice(0, cursor);
     else {
       assistant.reasoning = reasoning;
+      assistant.streaming = false;
+      assistant.text = '已核对笔记中的核心假设，接下来整理可验证的问题。';
       assistant.tools = [{ id: `${id}-t`, name: '思源 · 读取笔记', status: 'completed', text: '演示工具结果：已读取《研究想法》。\n此页未调用真实工具。' }];
-      assistant.text = response.slice(0, cursor - reasoning.length);
+      if (!answer) {
+        answer = { id: `${id}-answer`, role: 'assistant', phase: 'progress', text: '', streaming: true, time: Date.now() };
+        chat.messages.push(answer);
+      }
+      answer.text = response.slice(0, cursor - reasoning.length);
     }
     if (cursor >= reasoning.length + response.length) {
-      stopTimer(); assistant.streaming = false; state.busy = false; state.status = '';
+      stopTimer();
+      if (answer) { answer.streaming = false; answer.phase = 'final'; }
+      state.busy = false; state.status = '';
       sceneControl.value = 'answer'; syncURL();
     }
     update();
@@ -152,12 +166,24 @@ async function play(text?: string) {
 
 const controller = {
   setDisplayDetail: async (displayDetail: DisplayDetail) => { state.settings = { ...state.settings, displayDetail }; update(); syncURL(); },
-  previewReference: async (key: string) => { await new Promise(resolve => setTimeout(resolve, 200)); if (params.get('reference') === 'error') throw new Error('演示：模拟读取失败。'); const ref = activeChat().references.find(item => referenceKey(item) === key); if (!ref) throw new Error('这个引用已被移除。'); return { ...ref, text: ref.text || '这是引用的演示预览。未访问真实笔记。' }; },
+  previewReference: async (key: string, messageId?: string) => { await new Promise(resolve => setTimeout(resolve, 200)); if (params.get('reference') === 'error') throw new Error('演示：模拟读取失败。'); const references = messageId ? activeChat().messages.find(message => message.id === messageId)?.references : activeChat().references; const ref = references?.find(item => referenceKey(item) === key); if (!ref) throw new Error('找不到这条引用。'); return { ...ref, text: ref.text || '这是引用的演示预览。未访问真实笔记。' }; },
   addDroppedReferences: async (data: Record<string, string>) => { const targets = parseSiYuanDrag(data, demoWorkspace); if (!targets.length) throw new Error('请拖入思源文档、正文内容块或笔记本。'); for (const target of targets) { const key = referenceKey(target); if (!activeChat().references.some(ref => referenceKey(ref) === key)) activeChat().references.push({ ...(demoReferences[key] || { id: target.id, title: target.kind === 'notebook' ? '演示笔记本' : '演示笔记', kind: target.kind, text: '这是演示范围说明，未读取真实笔记。' }) }); } update(); },
   refreshModels: async () => { state.modelsLoading = true; state.modelsError = ''; update(); await new Promise(resolve => setTimeout(resolve, 250)); state.models = catalogMode === 'empty' ? [] : demoModels; state.modelsLoading = false; update(); },
   selectModel: async (provider: string, id: string, reasoningEffort = '') => { state.settings = { ...state.settings, provider, model: id, reasoningEffort }; update(); },
   chooseWorkingDirectory: async () => '~/Documents/Research-demo',
-  send: async (text: string) => { if (!state.busy && text.trim()) await play(text); },
+  send: async (text: string) => {
+    if (state.busy || !text.trim()) return false;
+    if (params.get('send') === 'before-error') throw Object.assign(new Error('演示：发送前连接失败，草稿与附件保留。'), { dispatched: false });
+    await play(text);
+    if (params.get('send') === 'unknown') {
+      stopTimer();
+      const chat = activeChat();
+      if (chat.messages.at(-1)?.streaming) chat.messages.pop();
+      state.busy = false; state.status = '发送结果未知'; update();
+      throw Object.assign(new Error('演示：已派发但连接中断，发送结果未知，不会自动重发。'), { dispatched: true });
+    }
+    return true;
+  },
   stop: async () => { stopTimer(); for (const message of activeChat().messages) if (message.streaming || message.tools?.some(tool => tool.status === 'running')) { message.streaming = false; message.interrupted = true; } state.busy = false; state.status = ''; update(); },
   newChat: async () => { stopTimer(); const chat = conversation('welcome', `preview-${++sequence}`); state.chats.unshift(chat); state.activeChatId = chat.id; state.busy = false; state.error = ''; sceneControl.value = 'welcome'; syncURL(); update(); },
   selectChat: async (id: string) => { if (!state.busy && state.chats.some(chat => chat.id === id)) { state.activeChatId = id; update(); } },
@@ -168,8 +194,8 @@ const controller = {
   diagnose: async () => { state.logs.push('演示：组件显示正常，此页未执行真实环境诊断。'); update(); },
   copyMessage: async (text: string) => navigator.clipboard.writeText(text),
   writeToNote: async () => false,
-  addCurrentNote: async () => { const refs = activeChat().references; if (!refs.some(ref => ref.id === 'demo-note')) refs.push({ ...demoReferences['demo-note'] }); update(); },
-  addSelection: async () => { const refs = activeChat().references; if (!refs.some(ref => ref.id === 'demo-selection')) refs.push({ id: 'demo-selection', title: '选区 · 核心假设', kind: 'selection', text: '核心假设：误差主要来自模型偏差。\n\n这是选区的演示快照。' }); update(); },
+  addCurrentNote: async () => { const refs = activeChat().references; if (!refs.some(ref => ref.id === demoReferences['demo-note'].id)) refs.push({ ...demoReferences['demo-note'] }); update(); },
+  addSelection: async () => { const refs = activeChat().references; if (!refs.some(ref => ref.id === 'demo-selection')) refs.push({ id: 'demo-selection', sourceId: demoReferences['demo-note'].id, title: '选区 · 核心假设', kind: 'selection', text: '核心假设：误差主要来自模型偏差。\n\n这是选区的演示快照。' }); update(); },
   removeReference: async (key: string) => { activeChat().references = activeChat().references.filter(ref => referenceKey(ref) !== key); update(); },
 };
 
@@ -206,8 +232,8 @@ document.querySelector('#preview-complete')!.addEventListener('click', () => {
     for (const tool of message.tools || []) if (tool.status === 'running') { tool.status = 'completed'; tool.text = '演示：工具已返回结果。'; }
   }
   const last = chat.messages.at(-1);
-  if (last?.role === 'assistant' && last.text) last.text = response;
-  else chat.messages.push({ id: `demo-complete-${++sequence}`, role: 'assistant', text: response, time: Date.now() });
+  if (last?.role === 'assistant' && last.text && !last.tools?.length) { last.text = response; last.phase = 'final'; }
+  else chat.messages.push({ id: `demo-complete-${++sequence}`, role: 'assistant', phase: 'final', text: response, time: Date.now() });
   state.busy = false; state.status = ''; sceneControl.value = 'answer'; syncURL(); update();
 });
 function demoDrag() {

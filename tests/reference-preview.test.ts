@@ -7,7 +7,7 @@ import * as markdown from '../src/ui/markdown';
 import * as references from '../src/references';
 
 const id = '20261020000000-demo003';
-let ReferencePreview: { render(props: { reference: any; nativeHover: boolean; controller: any; busy?: boolean }): { html: string } };
+let ReferencePreview: { render(props: { reference: any; nativeHover: boolean; controller: any; busy?: boolean; messageId?: string; removable?: boolean }): { html: string } };
 beforeAll(async () => {
   const require = createRequire(import.meta.url);
   const components: Record<string, any> = {};
@@ -52,7 +52,7 @@ describe('typed reference preview', () => {
     expect(references.referenceKey(book)).toBe(`notebook:${id}`);
     expect(references.referenceKey(document)).toBe(id);
     expect(html).toContain('预览：笔记本 · 演示研究库');
-    expect(html).toContain('预览：演示文档');
+    expect(html).toContain('打开：演示文档');
     expect(html.match(/data-type="block-ref"/g)).toHaveLength(1);
   });
 
@@ -74,5 +74,68 @@ describe('typed reference preview', () => {
     expect(html).not.toContain('data-type="block-ref"');
     expect(html).toContain('aria-label="移除引用：笔记本 · 演示研究库"');
     expect(html).toMatch(/<button[^>]*class="reference-remove[^>]*disabled/);
+  });
+
+  it.each(['document', 'notebook', 'selection'] as const)('keeps sent %s references previewable without removal controls', kind => {
+    const previewReference = vi.fn();
+    const html = ReferencePreview.render({ reference: { id, title: '发送时标题', kind, text: '发送时快照' }, nativeHover: false,
+      controller: { previewReference }, messageId: 'message-one', removable: false }).html;
+    expect(html).toContain(`aria-label="${kind === 'document' ? '打开' : '预览'}：${kind === 'notebook' ? '笔记本 · ' : ''}发送时标题"`);
+    if (kind === 'document') expect(html).toContain(`href="siyuan://blocks/${id}"`);
+    else expect(html).toContain('aria-expanded="false"');
+    expect(html).not.toContain('class="reference-remove');
+    expect(html).not.toContain('移除引用');
+    expect(previewReference).not.toHaveBeenCalled();
+  });
+
+  it('retains native block previews exclusively for sent documents when a notebook shares the ID', () => {
+    const document = ReferencePreview.render({ reference: { id, title: '历史文档', kind: 'document' }, nativeHover: true,
+      controller: {}, messageId: 'sent', removable: false }).html;
+    const notebook = ReferencePreview.render({ reference: { id, title: '历史范围', kind: 'notebook' }, nativeHover: true,
+      controller: {}, messageId: 'sent', removable: false }).html;
+    expect(document).toContain('data-type="block-ref"');
+    expect(document).toContain(`data-id="${id}"`);
+    expect(document).not.toContain('aria-expanded');
+    expect(notebook).not.toContain('data-type="block-ref"');
+    expect(notebook).not.toContain(`data-id="${id}"`);
+    expect(notebook).toContain('aria-expanded="false"');
+    expect(document + notebook).not.toContain('移除引用');
+  });
+
+  it('escapes markup and attribute delimiters in sent reference titles', () => {
+    const html = ReferencePreview.render({ reference: { id, title: '"><script>alert(1)</script>', kind: 'notebook' },
+      nativeHover: false, controller: {}, messageId: 'sent', removable: false }).html;
+    expect(html).not.toContain('<script>');
+    expect(html).toContain('&lt;script>');
+    expect(html).toContain('&quot;');
+    expect(html).not.toContain('移除引用');
+  });
+
+  it.each(['document', 'block', undefined])('renders %s attachment labels as native navigation links', kind => {
+    const html = ReferencePreview.render({ reference: { id, title: '定位来源', kind }, nativeHover: true, controller: {}, busy: true }).html;
+    expect(html).toMatch(new RegExp(`<a[^>]*href="siyuan://blocks/${id}"`));
+    expect(html).toContain('aria-label="打开：定位来源"');
+    expect(html).toContain('data-type="block-ref"');
+    expect(html).not.toMatch(/<a[^>]*(?:disabled|target=)/);
+  });
+
+  it('links a selection to its source block while keeping snapshot hover separate', () => {
+    const html = ReferencePreview.render({ reference: { id: 'selection-snapshot', sourceId: id, title: '选区来源', kind: 'selection' },
+      nativeHover: true, controller: {}, messageId: 'sent', removable: false }).html;
+    expect(html).toContain(`href="siyuan://blocks/${id}"`);
+    expect(html).toContain('aria-label="打开：选区来源"');
+    expect(html).not.toContain('data-type="block-ref"');
+    expect(html).not.toContain('reference-remove');
+  });
+
+  it.each([
+    { id: 'javascript:alert(1)', kind: 'document' },
+    { id, sourceId: 'javascript:alert(1)', kind: 'selection' },
+    { id, sourceId: id, kind: 'notebook' },
+    { id: 'selection-old', kind: 'selection' },
+  ])('does not invent a navigation target for %j', reference => {
+    const html = ReferencePreview.render({ reference: { ...reference, title: '引用' }, nativeHover: false, controller: {} }).html;
+    expect(html).not.toContain('href=');
+    expect(html).toContain('aria-label="预览：');
   });
 });

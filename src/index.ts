@@ -173,13 +173,17 @@ export default class DeepSeekHarnessPlugin extends Plugin {
   };
   private trackSelection = () => {
     const selection = window.getSelection();
-    if (!selection || selection.isCollapsed || !selection.toString().trim()) return;
-    const element = selection.anchorNode?.nodeType === Node.ELEMENT_NODE ? selection.anchorNode as Element : selection.anchorNode?.parentElement;
+    if (!selection || selection.isCollapsed || !selection.rangeCount || !selection.toString().trim()) return;
+    const range = selection.getRangeAt(0);
+    const start = range.startContainer;
+    const node = start.nodeType === Node.ELEMENT_NODE ? start.childNodes[range.startOffset] || start : start;
+    const element = node.nodeType === Node.ELEMENT_NODE ? node as Element : node.parentElement;
     const editor = element?.closest('.protyle');
     if (!editor || element?.closest('.dsh-dock')) return;
     const block = element?.closest('[data-node-id]') as HTMLElement | null;
     const text = selection.toString();
-    this.selection = { id: `selection-${Date.now()}`, title: `选区 · ${block?.dataset.nodeId || '正文'}`, kind: 'selection', text: text.slice(0, 12000), truncated: text.length > 12000 };
+    this.selection = { id: `selection-${Date.now()}`, sourceId: block?.dataset.nodeId,
+      title: `选区 · ${block?.dataset.nodeId || '正文'}`, kind: 'selection', text: text.slice(0, 12000), truncated: text.length > 12000 };
   };
   private async api(endpoint: string, data: unknown) {
     const response = await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });

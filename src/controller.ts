@@ -7,7 +7,7 @@ import { bridgeSource, bridgePatch } from './bridge';
 import { AssistantStreams } from './stream';
 import { parseSiYuanDrag, isSiYuanId, referenceKey } from './references';
 import type { UiEvent } from './events';
-import type { Chat, DisplayDetail, Host, Message, Settings, State } from './types';
+import type { Chat, DisplayDetail, Host, Message, NoteReference, Settings, State } from './types';
 
 const uid = () => globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 export function runtimeKey(settings: Settings): string {
@@ -15,8 +15,8 @@ export function runtimeKey(settings: Settings): string {
   return JSON.stringify(publicSettings);
 }
 
-export function buildPrompt(text: string, chat: Chat): string {
-  const refs = chat.references.map(ref => ref.kind === 'notebook' ? [
+export function buildPrompt(text: string, references: NoteReference[]): string {
+  const refs = references.map(ref => ref.kind === 'notebook' ? [
     `<notebook-reference id=${JSON.stringify(ref.id)} title=${JSON.stringify(ref.title)}>`,
     '这是笔记本检索范围引用，该 ID 在此仅表示笔记本范围，不是文档或块引用；尚未读取整本正文。请通过已连接的思源 MCP 按需检索和读取；工具不可用时如实说明，不要声称已阅读整本。',
     ...(ref.text ? [ref.text.slice(0, 12000)] : []),
@@ -40,6 +40,8 @@ export class ChatController {
   private persistQueue: Promise<unknown> = Promise.resolve();
   private patchDir = '';
   private runChatId = '';
+  private runMessageId = '';
+  private runFinalId = '';
   private stopping = false;
   private destroyed = false;
   private connectTask: Promise<void> | null = null;
@@ -86,7 +88,7 @@ export class ChatController {
     }
     if (!message && !live.text && !live.reasoning && !live.tools.length) return;
     if (!message) {
-      message = { id: live.messageId, role: 'assistant', text: '', time: Date.now(), turn: live.turn, step: live.step };
+      message = { id: live.messageId, role: 'assistant', phase: 'progress', text: '', time: Date.now(), turn: live.turn, step: live.step };
       chat.messages.push(message);
     }
     // The canonical assistant/message normally arrives just before stream.end.
@@ -105,7 +107,7 @@ export class ChatController {
     const live = this.streams.current(chat.sessionId, event.turn, event.step);
     let message = chat.messages.find(item => item.id === id || (event.seq !== undefined && item.seq === event.seq));
     message ??= live ? chat.messages.find(item => item.id === live.messageId) : undefined;
-    if (!message) { message = { id, role: 'assistant', text: '', time: Date.now() }; chat.messages.push(message); }
+    if (!message) { message = { id, role: 'assistant', phase: 'progress', text: '', time: Date.now() }; chat.messages.push(message); }
     const tools = event.toolCalls?.map(call => ({
       id: call.id, name: call.name, status: 'running' as const,
       text: call.arguments === undefined ? undefined : typeof call.arguments === 'string' ? call.arguments : JSON.stringify(call.arguments),
@@ -118,7 +120,7 @@ export class ChatController {
     const id = event.toolCallId || `tool-${event.seq ?? uid()}`;
     let message = [...chat.messages].reverse().find(item => item.tools?.some(tool => tool.id === id));
     if (!message) {
-      message = { id: `activity-${id}`, role: 'assistant', text: '', time: Date.now(), tools: [] };
+      message = { id: `activity-${id}`, role: 'assistant', phase: 'progress', text: '', time: Date.now(), tools: [] };
       chat.messages.push(message);
     }
     const tools = message.tools ||= [];
@@ -250,7 +252,14 @@ export class ChatController {
     await this.persist(); this.emit();
     return additions.length;
   }
-  async previewReference(key: string) {
+  async previewReference(key: string, messageId?: string) {
+    if (messageId !== undefined) {
+      const message = this.activeChat.messages.find(item => item.id === messageId && item.role === 'user');
+      if (!message) throw new Error('找不到这条用户消息。');
+      const ref = message.references?.find(item => referenceKey(item) === key);
+      if (!ref) throw new Error('这条消息没有这个引用。');
+      return { ...ref, text: ref.text ?? '' };
+    }
     const ref = this.activeChat.references.find(item => referenceKey(item) === key);
     if (!ref) throw new Error('这个引用已被移除。');
     if (ref.text !== undefined) return { ...ref };
@@ -267,10 +276,12 @@ export class ChatController {
     }
     return { ...ref, text: '' };
   }
-  async addCurrentNote() { this.requireIdle(); await this.addReference(await this.host.getCurrentNote()); }
-  async addSelection() { this.requireIdle(); await this.addReference(await this.host.getSelection()); }
-  private async addReference(ref: Chat['references'][number]) {
-    const refs = this.activeChat.references;
+  async addCurrentNote() { this.requireIdle(); const chat = this.activeChat; await this.addReference(await this.host.getCurrentNote(), chat); }
+  async addSelection() { this.requireIdle(); const chat = this.activeChat; await this.addReference(await this.host.getSelection(), chat); }
+  private async addReference(ref: NoteReference, chat: Chat) {
+    this.requireIdle();
+    if (this.activeChat !== chat) throw new Error('对话已切换，请重新添加引用。');
+    const refs = chat.references;
     if (!refs.some(item => referenceKey(item) === referenceKey(ref))) {
       if (refs.length >= 6) throw new Error('每次最多引用 6 条笔记或选区。');
       refs.push(ref);
@@ -334,6 +345,20 @@ export class ChatController {
       if (event.type === 'assistant' && (event.text || event.reasoning || event.toolCalls?.length)) {
         this.applyAssistant(chat, event);
         void this.persist().catch(error => this.log(`保存会话失败：${error.message}`));
+      } else if (event.type === 'turn-end' && event.status === 'completed') {
+        const start = chat.messages.findIndex(message => message.id === this.runMessageId);
+        const message = chat.messages.at(-1);
+        // A completed turn identifies a candidate; session/wait also waits for
+        // child agents, which may trigger further turns for this same prompt.
+        if (this.state.busy && !this.stopping && !this.state.error && chat.id === this.runChatId && start >= 0
+          && !chat.messages.slice(start + 1).some(item => item.role === 'user')
+          && message?.role === 'assistant' && message.phase === 'progress' && message.text.trim()
+          && !message.interrupted && !message.streaming && !message.tools?.length
+          && (message.seq !== undefined || message.streaming === false)
+          && (event.turn === undefined || message.turn === event.turn)
+          && (event.seq === undefined || message.seq === undefined || message.seq < event.seq)) {
+          this.runFinalId = message.id;
+        }
       } else if (event.type === 'error' || (event.type === 'turn-end' && event.status !== 'completed')) {
         if (!(this.stopping && event.status === 'aborted')) {
           this.state.error = event.text || `Harness 回合结束：${event.status || 'error'}，请查看诊断日志。`; this.log(this.state.error);
@@ -376,46 +401,67 @@ export class ChatController {
     if (!this.state.busy || !this.state.connected) this.state.status = '已停止';
     this.emit();
   }
-  async send(text: string) {
-    this.requireIdle(); if (!text.trim()) return;
-    if (text.length > 50000) throw new Error('消息过长，请控制在 50000 字符以内。');
+  async send(text: string): Promise<boolean> {
+    if (this.state.busy) throw Object.assign(new Error('请等本轮结束，或先停止当前任务。'), { dispatched: false });
+    if (!text.trim()) return false;
+    if (text.length > 50000) throw Object.assign(new Error('消息过长，请控制在 50000 字符以内。'), { dispatched: false });
     this.state.busy = true; this.stopping = false; this.state.error = '';
     const chat = this.activeChat; this.runChatId = chat.id;
+    const draftReferences = chat.references;
+    const previous = { started: chat.started, runtimeKey: chat.runtimeKey, title: chat.title, updatedAt: chat.updatedAt };
+    let dispatched = false;
+    let message: Message | undefined;
     try {
       await this.openClient();
-      if (this.stopping || !this.client) return;
+      if (this.stopping || !this.client) return false;
       const client = this.client;
       const key = runtimeKey(this.state.settings);
       if (chat.started && chat.runtimeKey !== key) throw new Error('该会话的运行配置已改变。请恢复原配置，或新建对话，避免把旧历史接入另一运行环境。');
       if (chat.started && !this.restored.has(chat.sessionId)) await client.resume(chat.sessionId);
-      if (this.stopping || this.client !== client) return;
-      const wasStarted = chat.started, previousKey = chat.runtimeKey;
-      const message: Message = { id: uid(), role: 'user', text: text.trim(), time: Date.now() };
+      if (this.stopping || this.client !== client) return false;
+      message = { id: uid(), role: 'user', text: text.trim(), time: Date.now(),
+        ...(draftReferences.length ? { references: draftReferences.map(({ id, title, text, kind, truncated, sourceId }) => ({ id, title, text, kind, truncated, sourceId })) } : {}) };
+      this.runMessageId = message.id;
       chat.messages.push(message);
+      chat.references = [];
       if (chat.title === '新对话') chat.title = text.trim().slice(0, 28);
       chat.updatedAt = Date.now(); chat.runtimeKey = key; chat.started = true;
       await this.persist();
-      if (this.stopping || this.client !== client) {
-        chat.started = wasStarted; chat.runtimeKey = previousKey;
-        chat.messages = chat.messages.filter(item => item.id !== message.id);
-        return;
-      }
+      if (this.stopping || this.client !== client) return false;
       this.state.status = 'Agent 正在处理…'; this.emit();
+      const prompt = buildPrompt(message.text, message.references || []);
       // Once dispatched, transport loss is an unknown outcome: never auto-replay a prompt.
-      await client.prompt(chat.sessionId, [{ type: 'text', text: buildPrompt(text.trim(), chat) }]);
+      dispatched = true;
+      await client.prompt(chat.sessionId, [{ type: 'text', text: prompt }]);
       this.restored.add(chat.sessionId);
       await client.request('session/wait', { sessionId: chat.sessionId }, 0);
+      const start = chat.messages.findIndex(message => message.id === this.runMessageId);
+      const final = chat.messages.at(-1);
+      if (!this.stopping && !this.state.error && start >= 0
+        && !chat.messages.slice(start + 1).some(message => message.role === 'user')
+        && final?.id === this.runFinalId && final.role === 'assistant' && final.phase === 'progress' && final.text.trim()
+        && !final.streaming && !final.interrupted && !final.tools?.length) final.phase = 'final';
       this.state.status = this.stopping ? '已停止' : this.state.error ? '执行结束，请检查错误' : '本轮完成';
+      return true;
     } catch (error) {
       if (!this.stopping) {
-        this.state.error = `${error instanceof Error ? error.message : String(error)}\n本轮未确认完成，插件不会自动重发。`;
+        this.state.error = `${error instanceof Error ? error.message : String(error)}\n${dispatched ? '本轮未确认完成，插件不会自动重发。' : '消息尚未发送，已保留待发内容。'}`;
         this.state.status = '执行未完成'; this.log(this.state.error);
-        await this.closeClient();
+        try { await this.closeClient(); }
+        catch (closeError) { throw Object.assign(closeError instanceof Error ? closeError : new Error(String(closeError)), { dispatched }); }
+        throw Object.assign(error instanceof Error ? error : new Error(String(error)), { dispatched });
       }
-      if (!this.stopping) throw error;
+      return dispatched;
     } finally {
+      if (!dispatched && message) {
+        chat.messages = chat.messages.filter(item => item.id !== message!.id);
+        chat.references = draftReferences;
+        Object.assign(chat, previous);
+      }
       this.finishStreams(chat);
-      this.state.busy = false; this.runChatId = ''; this.emit(); await this.persist();
+      this.state.busy = false; this.runChatId = ''; this.runMessageId = ''; this.runFinalId = ''; this.emit();
+      try { await this.persist(); }
+      catch (error) { throw Object.assign(error instanceof Error ? error : new Error(String(error)), { dispatched }); }
     }
   }
   async diagnose() {

@@ -8,9 +8,11 @@
     export let controller: any;
     export let busy = false;
     export let nativeHover = false;
+    export let messageId: string | undefined = undefined;
+    export let removable = true;
     const dispatch = createEventDispatcher<{ remove: string }>();
     let element: HTMLDivElement;
-    let anchor: HTMLButtonElement;
+    let anchor: HTMLElement;
     let open = false;
     let loading = false;
     let error = "";
@@ -23,6 +25,8 @@
     $: notebook = reference?.kind === "notebook";
     $: referenceLabel = notebook ? `笔记本 · ${reference.title || "未命名"}` : reference.title || "笔记选区";
     $: native = nativeHover && !notebook && reference?.kind !== "selection" && isSiYuanId(reference?.id || "");
+    $: sourceId = reference?.kind === "selection" ? reference.sourceId : reference?.id;
+    $: targetId = !notebook && isSiYuanId(sourceId) ? sourceId : undefined;
     $: previewText = String(preview?.text || "");
     $: truncated = Boolean(preview?.truncated || previewText.length > 1600);
 
@@ -69,7 +73,9 @@
         position(); open = true; loading = true; error = "";
         const current = ++loadId;
         try {
-            const result = await controller.previewReference(referenceIdentity);
+            const result = messageId
+                ? await controller.previewReference(referenceIdentity, messageId)
+                : await controller.previewReference(referenceIdentity);
             if (current !== loadId) return;
             preview = result;
         } catch (cause) {
@@ -82,8 +88,8 @@
 <svelte:window on:click={outside} on:resize={hide} on:scroll|capture={scroll} on:keydown={event => { if (event.key === "Escape") hide(); }} />
 
 <div class="reference" role="group" aria-label={`引用：${referenceLabel}`} bind:this={element} on:mouseenter={cancelClose} on:mouseleave={leave} on:focusout={focusOut}>
-    <button class="reference-open" bind:this={anchor} aria-label={`预览：${referenceLabel}`} aria-expanded={native ? undefined : open} data-type={native ? "block-ref" : undefined} data-id={native ? reference.id : undefined} data-subtype={native ? "d" : undefined} on:mouseenter={hover} on:focus={hover} on:click={() => { if (!native) void show(); }}><Icon name={notebook ? "notebook" : "note"} size={13} /><span class="reference-title">{referenceLabel}</span></button>
-    <button class="reference-remove" aria-label={`移除引用：${referenceLabel}`} disabled={busy} on:click={() => dispatch("remove", referenceIdentity)}><Icon name="close" size={12} /></button>
+    <svelte:element this={targetId ? "a" : "button"} class="reference-open" bind:this={anchor} href={targetId ? `siyuan://blocks/${targetId}` : undefined} title={targetId ? "点击跳转到来源，悬停预览" : "预览引用"} aria-label={`${targetId ? "打开" : "预览"}：${referenceLabel}`} aria-expanded={targetId || native ? undefined : open} data-type={native ? "block-ref" : undefined} data-id={native ? reference.id : undefined} data-subtype={native ? "d" : undefined} on:mouseenter={hover} on:focus={hover} on:click={() => { if (targetId) hide(); else void show(); }}><Icon name={notebook ? "notebook" : "note"} size={13} /><span class="reference-title">{referenceLabel}</span></svelte:element>
+    {#if removable}<button class="reference-remove" aria-label={`移除引用：${referenceLabel}`} disabled={busy} on:click={() => dispatch("remove", referenceIdentity)}><Icon name="close" size={12} /></button>{/if}
     {#if open}
         <div class="reference-preview" style={placement} role="region" aria-label={`引用预览：${referenceLabel}`} on:mouseenter={cancelClose} on:mouseleave={leave}>
             <div class="preview-heading"><Icon name={notebook ? "notebook" : "note"} size={14} /><strong>{notebook ? `笔记本 · ${preview?.title || reference.title || "未命名"}` : preview?.title || reference.title || "引用预览"}</strong><button class="preview-close" aria-label="关闭引用预览" on:click={hide}><Icon name="close" size={13} /></button></div>
@@ -101,9 +107,9 @@
 
 <style>
     .reference { display: inline-flex; align-items: center; min-width: 0; max-width: 100%; padding: 3px 3px 3px 5px; border: 1px solid var(--dsh-border); border-radius: 8px; background: var(--dsh-bg); color: var(--dsh-muted); font-size: 11px; }
-    button { display: inline-flex; align-items: center; justify-content: center; padding: 0; border: 0; border-radius: 4px; background: transparent; color: inherit; font: inherit; cursor: pointer; }
-    button:hover { color: var(--dsh-text); background: var(--dsh-surface); }
-    button:focus-visible { outline: 2px solid var(--dsh-accent); outline-offset: 2px; }
+    button, a { display: inline-flex; align-items: center; justify-content: center; padding: 0; border: 0; border-radius: 4px; background: transparent; color: inherit; font: inherit; text-decoration: none; cursor: pointer; }
+    button:hover, a:hover { color: var(--dsh-text); background: var(--dsh-surface); }
+    button:focus-visible, a:focus-visible { outline: 2px solid var(--dsh-accent); outline-offset: 2px; }
     button:disabled { opacity: .4; cursor: not-allowed; }
     .reference-open { justify-content: flex-start; gap: 5px; min-width: 0; max-width: 100%; min-height: 18px; padding: 0 3px 0 1px; }
     .reference-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

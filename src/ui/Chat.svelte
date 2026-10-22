@@ -20,6 +20,7 @@
     let localError = "";
     let notice = "";
     let pending = "";
+    let sending = false;
     let composing = false;
     let dropActive = false;
     let headerActionsNear = false;
@@ -104,19 +105,27 @@
             localError = cause instanceof Error ? cause.message : String(cause);
             return false;
         } finally {
-            if (pending === name) pending = "";
+            if (pending === name) pending = sending && name !== "send" ? "send" : "";
         }
     }
 
     async function send() {
         const text = draft.trim();
-        if (!text || busy || pending) return;
+        if (!text || busy || pending || sending) return;
+        const chatId = state?.activeChatId;
+        sending = true;
         draft = "";
         attachOpen = false;
         modelOpen = false;
         followTail = true;
-        const result = await run("send", () => controller.send(text));
-        if (!result && !draft) draft = text;
+        let restore = false;
+        try {
+            await run("send", async () => {
+                try { restore = await controller.send(text) === false; }
+                catch (cause) { restore = (cause as { dispatched?: boolean })?.dispatched === false; throw cause; }
+            });
+            if (restore && state?.activeChatId === chatId && !draft) draft = text;
+        } finally { sending = false; }
     }
 
     function keydown(event: KeyboardEvent) {
@@ -266,16 +275,25 @@
                     {#each messages as message (message.id)}
                         {@const group = activityByMessage.get(message.id)}
                         {@const grouped = group ? activityPresentation(displayDetail, group).grouped : false}
-                        {@const showActivity = group && (grouped ? group.hasProcess && group.id === message.id : Boolean(message.reasoning || message.tools?.length))}
-                        {#if message.role !== "assistant" || message.text || showActivity || message.interrupted && !grouped || message.streaming && !grouped}
-                            <article class="message" class:user={message.role === "user"} class:system={message.role === "system"} class:streaming={message.streaming} class:activity={message.role === "assistant" && !message.text}>
+                        {@const progress = group?.progressIds.has(message.id)}
+                        {@const showBody = Boolean(message.text && !progress)}
+                        {@const showActivity = group && (grouped ? group.hasProcess && group.id === message.id : Boolean(message.reasoning || message.tools?.length || progress && message.text))}
+                        {#if message.role !== "assistant" || showBody || showActivity || message.interrupted && !grouped || message.streaming && !grouped}
+                            <article class="message" class:user={message.role === "user"} class:system={message.role === "system"} class:streaming={message.streaming} class:activity={message.role === "assistant" && !showBody}>
                                 {#if message.role === "assistant"}
                                     {#if showActivity}<Activity {group} {message} detail={displayDetail} on:copy={event => run("copy", () => controller.copyMessage(event.detail), "已复制代码")} />{/if}
-                                    {#if message.text}<div class="assistant-body"><Message text={message.text} streaming={Boolean(message.streaming)} on:copy={event => run("copy", () => controller.copyMessage(event.detail), "已复制代码")} /></div>
-                                    {:else if message.streaming && !grouped && !message.reasoning && !message.tools?.length}<div class="thinking-placeholder" role="status"><span class="activity-dot"></span><span>思考中</span></div>{/if}
-                                    {#if message.interrupted && (!grouped || message.text)}<div class="interrupted">已停止</div>{/if}
-                                {:else}<div class="message-text">{message.text}</div>{/if}
-                                {#if message.text && !message.streaming}
+                                    {#if showBody}<div class="assistant-body">{#if message.phase === "final"}<div class="answer-label">最终答复</div>{/if}<Message text={message.text} streaming={Boolean(message.streaming)} on:copy={event => run("copy", () => controller.copyMessage(event.detail), "已复制代码")} /></div>
+                                    {:else if message.streaming && !grouped && !message.text && !message.reasoning && !message.tools?.length}<div class="thinking-placeholder" role="status"><span class="activity-dot"></span><span>思考中</span></div>{/if}
+                                    {#if message.interrupted && (!grouped || showBody)}<div class="interrupted">已停止</div>{/if}
+                                {:else}
+                                    <div class="message-text">{message.text}</div>
+                                    {#if message.role === "user" && message.references?.length}
+                                        <div class="message-references" aria-label="本条消息的附件">
+                                            {#each message.references as reference (referenceKey(reference))}<ReferencePreview {reference} {controller} messageId={message.id} removable={false} nativeHover={nativeReferenceHover} />{/each}
+                                        </div>
+                                    {/if}
+                                {/if}
+                                {#if message.text && !message.streaming && !progress}
                                     <div class="message-actions"><button title="复制" aria-label="复制消息" on:click={() => run("copy", () => controller.copyMessage(message.text), "已复制")}><Icon name="copy" size={15} /></button>{#if message.role === "assistant"}<button title="写入笔记" aria-label="写入笔记" disabled={busy || !!pending} on:click={() => writeToNote(message.text)}><Icon name="write" size={15} /></button>{/if}</div>
                                 {/if}
                             </article>
@@ -289,7 +307,7 @@
         <section class="composer" aria-label="发送消息">
             <div class="composer-box" class:drop-active={dropActive} role="group" aria-label="消息与笔记引用">
                 {#if references.length}
-                    <div class="references" aria-label="本轮引用">
+                    <div class="references" aria-label="待发送附件">
                         {#each references as reference (referenceKey(reference))}<ReferencePreview {reference} {controller} busy={busy || !!pending} nativeHover={nativeReferenceHover} on:remove={event => run("reference", () => controller.removeReference(event.detail))} />{/each}
                     </div>
                 {/if}
@@ -335,7 +353,6 @@
                     {:else}<button class="send-button" title="发送（Enter）" aria-label="发送消息" disabled={!draft.trim() || !!pending} on:click={send}><Icon name="send" size={19} /></button>{/if}
                 </div>
             </div>
-            {#if busy}<p class="composer-hint">正在生成，点击停止以保留当前内容</p>{/if}
         </section>
     {:else}
         <Settings bind:settings {state} {pending} {busy} {displaySaving} {webPanel} changed={hasSettingsChanges} on:displayDetail={event => setDisplayDetail(event.detail)} on:save={() => save()} on:chooseCwd={chooseCwd} on:connect={() => save(true)} on:diagnose={() => run("diagnose", () => controller.diagnose())} on:disconnect={() => run("disconnect", () => controller.disconnect())} on:openWeb={event => { if (!busy && !pending && webPanel) void run("web", () => webPanel?.onOpen(event.detail)); }} />
@@ -392,9 +409,11 @@
     .message.user { display: flex; flex-direction: column; align-items: flex-end; align-self: flex-end; max-width: 82%; margin-bottom: 24px; }
     .message-text { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 14px; line-height: 24px; }
     .user .message-text { max-width: 100%; padding: 10px 16px; border-radius: 20px; background: var(--dsh-bubble); line-height: 22px; }
+    .message-references { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 5px; max-width: 100%; margin-top: 8px; }
     .system .message-text { color: var(--dsh-muted); font-size: 11px; }
     .assistant-body { min-width: 0; overflow-wrap: anywhere; }
     .assistant-body:not(:first-child) { margin-top: 12px; }
+    .answer-label { margin-bottom: 6px; color: var(--dsh-muted); font-size: 11px; line-height: 20px; }
     .message-actions { display: flex; align-items: center; gap: 3px; min-height: 27px; margin: 5px 0 -13px; opacity: 0; transition: opacity .12s; }
     .message:hover .message-actions, .message:focus-within .message-actions { opacity: 1; }
     .message-actions button { width: 27px; height: 25px; color: var(--dsh-muted); }
@@ -440,7 +459,6 @@
     button.stop-button { color: var(--dsh-text); background: var(--dsh-bg); border: 1px solid var(--dsh-border); }
     button.stop-button:hover:not(:disabled) { background: var(--dsh-bg); }
     .references { display: flex; flex-wrap: wrap; gap: 5px; max-height: 86px; padding-bottom: 7px; overflow-y: auto; }
-    .composer-hint { min-height: 23px; margin: 0; padding: 6px 2px 4px; text-align: center; color: var(--dsh-muted); font-size: 9px; opacity: .7; }
     .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
     @keyframes pulse { 0%, 100% { opacity: .3; } 50% { opacity: 1; } }
     @media (hover: none) { .message-actions { opacity: 1; } .header-actions .icon-button:not(:disabled) { color: var(--dsh-text); opacity: 1; } }

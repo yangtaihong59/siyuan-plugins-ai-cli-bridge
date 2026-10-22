@@ -6,14 +6,42 @@ const nodeRequire = createRequire(import.meta.url);
 const code = readFileSync('dist/index.js', 'utf8');
 const exposed = { Plugin: class {}, Dialog: class {}, showMessage() {}, confirm() {}, getAllEditor: () => [], getFrontend: () => 'desktop' };
 const pluginModule = { exports: {} };
+let selectedRange;
 vm.runInNewContext(code, {
   module: pluginModule, exports: pluginModule.exports,
   require: id => id === 'siyuan' ? exposed : nodeRequire(id),
   process, console, Buffer, setTimeout, clearTimeout, setInterval, clearInterval, URL,
+  window: { getSelection: () => selectedRange }, Node: { ELEMENT_NODE: 1 },
 }, { filename: 'index.js', timeout: 5000 });
 assert.equal(typeof pluginModule.exports, 'function');
 assert.equal(typeof pluginModule.exports.prototype.onload, 'function');
 console.log('CJS_PLUGIN_ENTRY_OK (native SiYuan UI not executed)');
+
+// Selection.anchorNode follows drag direction; Range.startContainer follows
+// document order. Exercise the built plugin against both directions and a
+// container-boundary selection, without reading or writing real notes.
+const selectionPlugin = new pluginModule.exports();
+const firstId = '20261022000000-first01', lastId = '20261022000000-last001';
+const editor = {};
+const blockNode = id => ({ nodeType: 1, childNodes: [], dataset: { nodeId: id },
+  closest(selector) { return selector === '.protyle' ? editor : selector === '[data-node-id]' ? this : null; } });
+const firstBlock = blockNode(firstId), lastBlock = blockNode(lastId);
+const firstText = { nodeType: 3, parentElement: firstBlock };
+const lastText = { nodeType: 3, parentElement: lastBlock };
+for (const anchorNode of [firstText, lastText]) {
+  selectedRange = { isCollapsed: false, rangeCount: 1, anchorNode, toString: () => '选区正文',
+    getRangeAt: () => ({ startContainer: firstText, startOffset: 2 }) };
+  selectionPlugin.trackSelection();
+  assert.equal(selectionPlugin.selection.sourceId, firstId);
+  assert.equal(selectionPlugin.selection.text, '选区正文');
+}
+selectedRange = { ...selectedRange, getRangeAt: () => ({ startContainer: { nodeType: 1, childNodes: [lastBlock, firstBlock] }, startOffset: 1 }) };
+selectionPlugin.trackSelection();
+assert.equal(selectionPlugin.selection.sourceId, firstId);
+selectedRange = { ...selectedRange, rangeCount: 0 };
+selectionPlugin.trackSelection();
+assert.equal(selectionPlugin.selection.sourceId, firstId);
+console.log('CJS_SELECTION_START_FORWARD_REVERSE_AND_CONTAINER_BOUNDARY_OK (mock DOM)');
 
 // Browser/mobile hosts must load the same bundle without any Node require or process.
 const calls = { docks: [], loaded: [], saved: [], commands: [], opened: [], nodeRequires: 0, disconnects: 0 };
